@@ -29,16 +29,16 @@ namespace TurbulentForcing {
     extern AMREX_GPU_MANAGED int verbose;
     // factor by which to reduce sampling for faster performance
     extern AMREX_GPU_MANAGED int ff_factor;
-    // make the forcing divergence free?
-    extern AMREX_GPU_MANAGED bool div_free_force;
     // how many modes to use
     extern AMREX_GPU_MANAGED int nmodes;
     // don't use any modes below mode_start. We probably don't need this
     extern AMREX_GPU_MANAGED int mode_start;
+    // fine tune force scale
+    extern AMREX_GPU_MANAGED amrex::Real force_scale_fudge;
     // suppress symmetry breaking modes
     extern AMREX_GPU_MANAGED amrex::Real forcing_epsilon;
     // time offset for forcing function
-    extern AMREX_GPU_MANAGED amrex::Real timeoffset;
+    extern AMREX_GPU_MANAGED amrex::Real time_offset;
 
     constexpr int array_size = 33;
     constexpr int num_fdarray = 17;

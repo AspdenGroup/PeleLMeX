@@ -21,6 +21,11 @@ PeleLM::Init()
   // Check run parameters
   checkRunParams();
 
+#ifdef PELE_USE_TURBFORCE
+  // Initialise the turbulent forcing parameters
+  TurbulentForcing::init_turbulent_forcing(geom[0].data());
+#endif
+  
   // Initialize data
   initData();
 }
@@ -370,10 +375,6 @@ PeleLM::initLevelData(int lev)
       ldata_p->divu.setVal(0.0);
     }
   }
-
-#ifdef PELE_USE_TURBFORCE
-  TurbulentForcing::init_turbulent_forcing(geomdata);
-#endif
 }
 
 void
