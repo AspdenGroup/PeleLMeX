@@ -437,16 +437,11 @@ TurbulentForcing::addTurbVelForces(GeometryData const& geomdata,
      // For now, only works in 3D and without tiling
      AMREX_ASSERT(AMREX_SPACEDIM==3);
 
-     //
-     // Looks the same from here
-     //
-     
      constexpr Real Pi = M_PI;
      constexpr Real TwoPi = 2.*Pi;
      
-     // Physical coordinates of the lower left corner of the domain
+     // Physical coordinates
      auto const& problo = geomdata.ProbLo();
-     // Physical coordinates of the upper right corner of the domain
      auto const& probhi = geomdata.ProbHi();
 
      Real Lx = probhi[0]-problo[0];
@@ -454,8 +449,8 @@ TurbulentForcing::addTurbVelForces(GeometryData const& geomdata,
      Real Lz = probhi[2]-problo[2];
      Real Lmin = min(Lx,Ly,Lz);
 
-     const int*  f_lo = bx.loVect();
-     const int*  f_hi = bx.hiVect();
+     const int* f_lo = bx.loVect();
+     const int* f_hi = bx.hiVect();
     
      int xstep = static_cast<int>(Lx/Lmin+0.5);
      int ystep = static_cast<int>(Ly/Lmin+0.5);
@@ -465,16 +460,7 @@ TurbulentForcing::addTurbVelForces(GeometryData const& geomdata,
 
      const Real forcetime = time + time_offset;
 
-     // force array bounds
-     // FIXME -- think about how bx (the box we want to fill) may not be the same as the force box!
-     int ilo = f_lo[0];
-     int jlo = f_lo[1];
-     int klo = f_lo[2];
-
-     auto const&  dx = geomdata.CellSize();
-     Real hx = dx[0];
-     Real hy = dx[1];
-     Real hz = dx[2];
+     auto const& dx = geomdata.CellSize();
 
      // Separate out forcing data into individual Array4's
      int i_arr = 0;
@@ -483,39 +469,23 @@ TurbulentForcing::addTurbVelForces(GeometryData const& geomdata,
      Dim3 fd_begin{0,0,0};
      Dim3 fd_end{TurbulentForcing::array_size,TurbulentForcing::array_size,TurbulentForcing::array_size};
 
-     Array4<Real> FTX(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> TAT(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPX(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPY(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPZ(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FAX(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FAY(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FAZ(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPXX(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPXY(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPXZ(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPYX(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPYY(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPYZ(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPZX(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPZY(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
-     i_arr++;
-     Array4<Real> FPZZ(&TurbulentForcing::forcedata[i_arr*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FTX(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> TAT(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPX(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPY(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPZ(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FAX(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FAY(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FAZ(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPXX(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPXY(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPXZ(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPYX(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPYY(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPYZ(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPZX(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPZY(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+     Array4<Real> FPZZ(&TurbulentForcing::forcedata[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
 
      RealBox loc = RealBox(bx,geomdata.CellSize(),geomdata.ProbLo());
      const auto& loc_lo = loc.lo();
@@ -525,6 +495,14 @@ TurbulentForcing::addTurbVelForces(GeometryData const& geomdata,
      // Construct force at fewer points and then interpolate.
      // This is much faster on CPU.
      //
+
+     Real hx = dx[0];
+     Real hy = dx[1];
+     Real hz = dx[2];
+
+     int ilo = f_lo[0];
+     int jlo = f_lo[1];
+     int klo = f_lo[2];
 
      int ihi = f_hi[0];
      int jhi = f_hi[1];
@@ -707,23 +685,10 @@ TurbulentForcing::addTurbVelForces(GeometryData const& geomdata,
          force(i,j,k,n) += rho(i,j,k) * ff;
 
      });
-
-     Real minRho(1.e234);
-     Real maxRho(-minRho);
-     for (int i=ilo; i<ihi; i++) {
-       for (int j=jlo; j<jhi; j++) {
-	 for (int k=klo; k<khi; k++) {
-	   Real locRho=rho(i,j,k);
-	   minRho = min(locRho,minRho);
-	   maxRho = max(locRho,maxRho);
-	 }
-       }
-     }
-     std::cout << " *** " << minRho << " " << maxRho << std::endl;
 }
 
 //
-// Add derived variables to plotfile -- FIXME: this is almost identical to above; simplify...
+// Add derived variables to plotfile
 //
 void
 TurbulentForcing::deriveForcing(
@@ -746,21 +711,23 @@ TurbulentForcing::deriveForcing(
      AMREX_ASSERT(statefab.box().contains(bx));
      AMREX_ASSERT(derfab.nComp() >= dcomp + ncomp);
      AMREX_ASSERT(!a_pelelm->m_incompressible);
-     
+
+     // Need geom for forcing
+     GeometryData const& geomdata = geom.data();
+
+     // addTurbVelForces "adds", so need to zero this to start
+     Array4<Real> const& der = derfab.array(dcomp);
+     derfab.setVal<RunOn::Device>(0., bx, dcomp, ncomp);
+
      // if using turbforce and is incompressible
-     // Density from statefab cannot be used 
+     // then make a fab with constant density m_rho
      FArrayBox DensityFab(bx);
      DensityFab.setVal(a_pelelm->m_rho);
      Array4<const Real> const& rho = (a_pelelm->m_incompressible) != 0
        ? DensityFab.array()
        : statefab.array(DENSITY);
-     
-     Array4<Real> const& der = derfab.array(dcomp);
-     
-     GeometryData const& geomdata = geom.data();
 
-     derfab.setVal<RunOn::Device>(0., bx, dcomp, ncomp);
-
+     // call the function above to construct the forcing
      addTurbVelForces(geomdata,bx,time,der,rho);
 }
 
