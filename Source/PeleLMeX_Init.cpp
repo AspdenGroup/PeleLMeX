@@ -7,6 +7,9 @@
 #ifdef PELE_USE_TURBFORCE
 #include <TurbulentForcing_def.H>
 #endif
+#ifdef PELE_USE_VELOCITY
+#include <PltFileManager.H>
+#endif
 
 using namespace amrex;
 
@@ -350,6 +353,44 @@ PeleLM::initLevelData(int lev)
   ProbParm const* lprobparm = prob_parm_d;
   auto const* lpmfdata = pmf_data.device_parm();
 
+#ifdef PELE_USE_VELOCITY
+  //
+  // load a turbulent velocity from a plot file to add
+  //
+
+  // get plotfile name
+  ParmParse pp("peleLM");
+  std::string velocity_plotfile;
+  pp.query("velocity_plotfile", velocity_plotfile);
+  if (!velocity_plotfile.empty())
+    amrex::Print() << "initLevelData: reading data from: " << velocity_plotfile << '\n';
+
+  // use PelePhysics file manager
+  pele::physics::pltfilemanager::PltFileManager pltData(velocity_plotfile);
+
+  // do some compatibility checks
+  //if (amrData.FinestLevel() < level)
+  //amrex::Abort("initData: not enough levels in plotfile");
+  //if (amrData.ProbDomain()[level] != Domain())
+  //amrex::Abort("initData: problem domains do not match");
+
+  // find velocity in the plotfile
+  int idXvel = -1;
+  Vector<std::string> plt_vars = pltData.getVariableList();
+  for (int i = 0; i < plt_vars.size(); ++i) {
+    if (plt_vars[i] == "x_velocity") idXvel = i;
+  }
+  if (idXvel == -1)
+    amrex::Abort("Could not find velocity fields in supplied velocity_plotfile");
+
+  // load directly into state
+  // fix me? --- need to take care not to overwrite in initdata()
+  //         --- may cause issues if initdata() adds and velocity doesn't got in as zero
+  // would be better as a temporary FM
+  // can also add a scaling factor...
+  pltData.fillPatchFromPlt(lev, geom[lev], idXvel, VELX, AMREX_SPACEDIM, ldata_p->state);
+#endif
+  
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
