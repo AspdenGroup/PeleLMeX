@@ -4,6 +4,9 @@
 #ifdef AMREX_USE_EB
 #include <AMReX_EB_utils.H>
 #endif
+#ifdef PELE_USE_TURBFORCE
+#include <TurbulentForcing_def.H>
+#endif
 
 using namespace amrex;
 
@@ -367,6 +370,10 @@ PeleLM::initLevelData(int lev)
       ldata_p->divu.setVal(0.0);
     }
   }
+
+#ifdef PELE_USE_TURBFORCE
+  TurbulentForcing::init_turbulent_forcing(geomdata);
+#endif
 }
 
 void
