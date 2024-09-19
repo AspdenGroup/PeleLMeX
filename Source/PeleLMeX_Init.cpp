@@ -364,15 +364,18 @@ PeleLM::initLevelData(int lev)
   pp.query("velocity_plotfile", velocity_plotfile);
   if (!velocity_plotfile.empty())
     amrex::Print() << "initLevelData: reading data from: " << velocity_plotfile << '\n';
+  // allow multiplicative scaling of the velocity
+  Real velocity_plotfile_scale(1.);
+  pp.query("velocity_plotfile_scale", velocity_plotfile_scale);
 
   // use PelePhysics file manager
   pele::physics::pltfilemanager::PltFileManager pltData(velocity_plotfile);
 
   // do some compatibility checks
-  //if (amrData.FinestLevel() < level)
-  //amrex::Abort("initData: not enough levels in plotfile");
-  //if (amrData.ProbDomain()[level] != Domain())
-  //amrex::Abort("initData: problem domains do not match");
+  if (pltData.getNlev() < lev)
+    amrex::Abort("USE_VELOCITY: not enough levels in plotfile");
+  if (pltData.getGeom(lev).Domain() != geomdata.Domain())
+    amrex::Abort("USE_VELOCITY: problem domains do not match");
 
   // find velocity in the plotfile
   int idXvel = -1;
@@ -383,29 +386,43 @@ PeleLM::initLevelData(int lev)
   if (idXvel == -1)
     amrex::Abort("Could not find velocity fields in supplied velocity_plotfile");
 
-  // load directly into state
-  // fix me? --- need to take care not to overwrite in initdata()
-  //         --- may cause issues if initdata() adds and velocity doesn't got in as zero
-  // would be better as a temporary FM
-  // can also add a scaling factor...
-  pltData.fillPatchFromPlt(lev, geom[lev], idXvel, VELX, AMREX_SPACEDIM, ldata_p->state);
+  // load data from plot file
+  BoxArray tmpVelBA(ldata_p->state.boxArray());
+  DistributionMapping tmpVelDM(tmpVelBA);
+  int nGrow0(0), sComp0(0);
+  MultiFab tmpVel(tmpVelBA, tmpVelDM, AMREX_SPACEDIM, nGrow0);
+  pltData.fillPatchFromPlt(lev, geom[lev], idXvel, sComp0, AMREX_SPACEDIM, tmpVel);
+  // scale the velocity
+  tmpVel.mult(velocity_plotfile_scale);
 #endif
   
 #ifdef AMREX_USE_OMP
 #pragma omp parallel if (Gpu::notInLaunchRegion())
 #endif
   for (MFIter mfi(ldata_p->state, TilingIfNotGPU()); mfi.isValid(); ++mfi) {
+
     const Box& bx = mfi.tilebox();
     FArrayBox DummyFab(bx, 1);
     auto const& state_arr = ldata_p->state.array(mfi);
     auto const& aux_arr =
       (m_nAux > 0) ? ldata_p->auxiliaries.array(mfi) : DummyFab.array();
+
+#ifdef PELE_USE_VELOCITY
+    auto const& tmpVel_arr = tmpVel.array(mfi);
+#endif
+
     amrex::ParallelFor(
       bx, [=, m_incompressible = m_incompressible] AMREX_GPU_DEVICE(
             int i, int j, int k) noexcept {
         pelelmex_initdata(
           i, j, k, m_incompressible, state_arr, aux_arr, geomdata, *lprobparm,
           lpmfdata);
+	
+#ifdef PELE_USE_VELOCITY
+	// add the velocity loaded from plotfile
+	for (int n=0; n<AMREX_SPACEDIM; n++)
+	  state_arr(i,j,k,XVEL+n) += tmpVel_arr(i,j,k,n);
+#endif
       });
   }
 
