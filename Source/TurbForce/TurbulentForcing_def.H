@@ -48,6 +48,9 @@ TurbulentForcing::init_turbulent_forcing (GeometryData const& geomdata)
     // Read in parameters
     ParmParse pp("turb");
 
+    verbose = 0;
+    pp.query("v", verbose);        
+
     // first mode to force
     mode_start = 0;
     pp.query("mode_start", mode_start);
@@ -90,52 +93,6 @@ TurbulentForcing::init_turbulent_forcing (GeometryData const& geomdata)
     int hack_lz = 0;
     pp.query("hack_lz",hack_lz);
 
-    verbose = 0;
-    pp.query("v", verbose);        
-
-    //
-    // calculate turbulent forcing scales (using andy's reference values)
-    //
-    const Real flr(2.64e-2), fvr(3.27), fts_min(1.21e-3), fts_max(2.42e-3);
-    Real fsr;
-    if (Lx == Lz) { 
-	fsr = 1.47e7; // cubic reference value
-    } else {          
-	fsr = 1.41e7; // non-cubic reference value
-    }
-    const Real force_scale = force_scale_fudge * fsr * pow(urms / fvr,2) * pow(flr/Lx,3);
-    const Real forcing_time_scale_min = fts_min * (fvr/flr) * (Lx/urms);
-    const Real forcing_time_scale_max = fts_max * (fvr/flr) * (Lx/urms);
-
-    // tmp CPU storage that holds everything in one flat array
-    const int num_elmts = array_size*array_size*array_size;
-    const int tmp_size  = num_fdarray*num_elmts;
-    Real tmp[tmp_size];
-
-    // Separate out forcing data into individual Array4's
-    int i_arr = 0;
-    int fd_ncomp = 1;
-    Dim3 fd_begin{0,0,0};
-    Dim3 fd_end{array_size,array_size,array_size};
-
-    Array4<Real> FTX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> TAT(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FAX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FAY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FAZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPXX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPXY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPXZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPYX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPYY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPYZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPZX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPZY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-    Array4<Real> FPZZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
-
     if (hack_lz>0) {
       if (hack_lz==1) {
         Lz = Lz/2.0;
@@ -150,6 +107,20 @@ TurbulentForcing::init_turbulent_forcing (GeometryData const& geomdata)
         Print() << "Ly = " << Ly << std::endl;
         Print() << "Lz = " << Lz << std::endl;
     }
+
+    //
+    // calculate turbulent forcing scales (using andy's reference values)
+    //
+    const Real flr(2.64e-2), fvr(3.27), fts_min(1.21e-3), fts_max(2.42e-3);
+    Real fsr;
+    if (Lx == Lz) { 
+	fsr = 1.47e7; // cubic reference value
+    } else {          
+	fsr = 1.41e7; // non-cubic reference value
+    }
+    const Real force_scale = force_scale_fudge * fsr * pow(urms / fvr,2) * pow(flr/Lx,3);
+    const Real forcing_time_scale_min = fts_min * (fvr/flr) * (Lx/urms);
+    const Real forcing_time_scale_max = fts_max * (fvr/flr) * (Lx/urms);
 
     Real Lmin = std::min(Lx,std::min(Ly,Lz));
     Real kappaMax = ((Real)nmodes)/Lmin + 1.0e-8;
@@ -180,6 +151,35 @@ TurbulentForcing::init_turbulent_forcing (GeometryData const& geomdata)
         Print() << "freqDiff = " << freqDiff << std::endl;
     }
 
+    // tmp CPU storage that holds everything in one flat array
+    const int num_elmts = array_size*array_size*array_size;
+    const int tmp_size  = num_fdarray*num_elmts;
+    Real tmp[tmp_size];
+
+    // Separate out forcing data into individual Array4's
+    int i_arr = 0;
+    int fd_ncomp = 1;
+    Dim3 fd_begin{0,0,0};
+    Dim3 fd_end{array_size,array_size,array_size};
+
+    Array4<Real> FTX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> TAT(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FAX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FAY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FAZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPXX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPXY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPXZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPYX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPYY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPYZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPZX(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPZY(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    Array4<Real> FPZZ(&tmp[(i_arr++)*num_elmts], fd_begin, fd_end, fd_ncomp);
+    
     // initiate the magic
     DepRand::InitRandom((unsigned long)111397);
     
