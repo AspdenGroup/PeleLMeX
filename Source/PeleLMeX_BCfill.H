@@ -58,7 +58,6 @@ struct PeleLMCCFillExtDirState
 
         // bcnormal handles all the state components at once
         amrex::Real s_ext[NVAR] = {0.0};
-
         // Get current state component BC
         const int* bc = bcr[n].data();
 
@@ -111,6 +110,96 @@ struct PeleLMCCFillExtDirState
           bcnormal(
             x, m_nAux, s_ext, idir, -1, time, geom, *lprobparm, lpmfdata);
           state(iv, n) = s_ext[n];
+        }
+      }
+    }
+  }
+};
+
+struct PeleLMCCFillExtDirAux
+{
+
+  ProbParm const* lprobparm;
+  pele::physics::PMF::PmfData::DataContainer const* lpmfdata;
+  const int m_nAux;
+
+  AMREX_GPU_HOST
+  constexpr PeleLMCCFillExtDirAux(
+    ProbParm const* a_prob_parm,
+    pele::physics::PMF::PmfData::DataContainer const* a_pmf_data,
+    int a_nAux)
+    : lprobparm(a_prob_parm), lpmfdata(a_pmf_data), m_nAux(a_nAux)
+  {
+  }
+
+  AMREX_GPU_DEVICE
+  void operator()(
+    const amrex::IntVect& iv,
+    amrex::Array4<amrex::Real> const& aux,
+    const int /*dcomp*/,
+    const int /*numcomp*/,
+    amrex::GeometryData const& geom,
+    const amrex::Real time,
+    const amrex::BCRec* bcr,
+    const int /*bcomp*/,
+    const int /*orig_comp*/) const
+  {
+    // Get geometry data
+    const int* domlo = geom.Domain().loVect();
+    const int* domhi = geom.Domain().hiVect();
+    const amrex::Real* prob_lo = geom.ProbLo();
+    const amrex::Real* dx = geom.CellSize();
+    const amrex::Real x[AMREX_SPACEDIM] = {AMREX_D_DECL(
+      prob_lo[0] + (iv[0] + 0.5) * dx[0], prob_lo[1] + (iv[1] + 0.5) * dx[1],
+      prob_lo[2] + (iv[2] + 0.5) * dx[2])};
+
+#if AMREX_SPACEDIM == 2
+    auto aux_ext = aux.cellData(iv[0], iv[1], 0);
+#else
+    auto aux_ext = aux.cellData(iv[0], iv[1], iv[2]);
+#endif
+
+#ifndef PELE_CUSTOM_BCNORMAL_AUX
+    amrex::ignore_unused(x, time, aux_ext);
+#endif
+
+    for (int idir = 0; idir < AMREX_SPACEDIM; idir++) {
+
+      // Low
+      for (int n = 0; n < m_nAux; n++) {
+
+        // Get current state component BC
+        const int* bc = bcr[n].data();
+
+        if ((bc[idir] == amrex::BCType::ext_dir) and (iv[idir] < domlo[idir])) {
+          // bcnormal() is defined in pelelmex_prob.H in problem directory in
+          // /Exec
+#ifdef PELE_CUSTOM_BCNORMAL_AUX
+          bcnormal_aux(x, aux_ext, idir, 1, time, geom, *lprobparm, lpmfdata);
+#else
+          amrex::Abort("Auxiliary variable with Dirichlet boundary with no "
+                       "bcnormal_aux function...");
+#endif
+        }
+      }
+
+      // High
+      for (int n = 0; n < m_nAux; n++) {
+
+        // Get current state component BC
+        const int* bc = bcr[n].data();
+
+        if (
+          (bc[idir + AMREX_SPACEDIM] == amrex::BCType::ext_dir) and
+          (iv[idir] > domhi[idir])) {
+
+          // /Exec
+#ifdef PELE_CUSTOM_BCNORMAL_AUX
+          bcnormal_aux(x, aux_ext, idir, -1, time, geom, *lprobparm, lpmfdata);
+#else
+          amrex::Abort("Auxiliary variable with Dirichlet boundary with no "
+                       "bcnormal_aux function...");
+#endif
         }
       }
     }
@@ -371,7 +460,6 @@ struct PeleLMCCFillExtDirTemp
 
     // bcnormal handles all the state components at once
     amrex::Real s_ext[NVAR] = {0.0};
-
     for (int idir = 0; idir < AMREX_SPACEDIM; idir++) {
       // Low
       if ((bc[idir] == amrex::BCType::ext_dir) and (iv[idir] < domlo[idir])) {
@@ -397,7 +485,7 @@ struct PeleLMCCFillExtDirTemp
   }
 };
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
 struct PeleLMCCFillExtDirnE
 {
 
@@ -468,7 +556,7 @@ struct PeleLMCCFillExtDirnE
 };
 #endif
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
 struct PeleLMCCFillExtDirPhiV
 {
 

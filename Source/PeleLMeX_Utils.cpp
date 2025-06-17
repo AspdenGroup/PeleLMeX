@@ -3,7 +3,7 @@
 #include <PeleLMeX_K.H>
 #include <hydro_utils.H>
 #include <memory>
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
 #include <PeleLMeX_EF_Constants.H>
 #endif
 
@@ -12,9 +12,6 @@ using namespace amrex;
 void
 writeBuildInfo()
 {
-  std::string OtherLine = std::string(78, '-') + "\n";
-  std::string SkipSpace = std::string(8, ' ');
-
   // build information
   std::cout << PrettyLine;
   std::cout << " PeleLMeX Build Information\n";
@@ -658,6 +655,7 @@ PeleLM::floorSpecies(const TimeStamp& a_time)
 
     auto* ldata_p = getLevelDataPtr(lev, a_time);
     auto const& sma = ldata_p->state.arrays();
+    auto const* leosparm = eos_parms.device_parm();
 
     amrex::ParallelFor(
       ldata_p->state,
@@ -665,7 +663,7 @@ PeleLM::floorSpecies(const TimeStamp& a_time)
         fabMinMax(
           i, j, k, NUM_SPECIES, 0.0, AMREX_REAL_MAX,
           Array4<Real>(sma[box_no], FIRSTSPEC));
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
         fabMinMax(
           i, j, k, 1, 0.0, AMREX_REAL_MAX, Array4<Real>(sma[box_no], NE));
 #endif
@@ -676,7 +674,7 @@ PeleLM::floorSpecies(const TimeStamp& a_time)
         }
 
         // ... as well as rhoh
-        auto eos = pele::physics::PhysicsType::eos();
+        auto eos = pele::physics::PhysicsType::eos(leosparm);
         Real massfrac[NUM_SPECIES] = {0.0};
         Real rhoinv = Real(1.0) / sma[box_no](i, j, k, DENSITY);
         for (int n = 0; n < NUM_SPECIES; n++) {
@@ -867,6 +865,7 @@ PeleLM::loadBalanceChemLev(int a_lev)
       ParallelDescriptor::MyProc() == ParallelDescriptor::IOProcessorNumber()) {
       pmap = test_dmap.ProcessorMap();
     } else {
+#pragma GCC diagnostic ignored "-Wnull-dereference"
       pmap.resize(static_cast<std::size_t>(m_baChem[a_lev]->size()));
     }
     ParallelDescriptor::Bcast(
@@ -1020,7 +1019,7 @@ PeleLM::initProgressVariable()
 {
   Vector<std::string> varNames;
   pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(
-    varNames);
+    varNames, &(eos_parms.host_parm()));
   varNames.push_back("temp");
 
   ParmParse pp("peleLM");
@@ -1260,6 +1259,26 @@ PeleLM::fetchDiffTypeArray(int scomp, int ncomp)
   return types;
 }
 
+Vector<int>
+PeleLM::fetchAdvTypeAuxArray(int scomp, int ncomp)
+{
+  Vector<int> types(ncomp);
+  for (int comp = 0; comp < ncomp; comp++) {
+    types[comp] = m_AdvTypeAux[scomp + comp];
+  }
+  return types;
+}
+
+Vector<int>
+PeleLM::fetchDiffTypeAuxArray(int scomp, int ncomp)
+{
+  Vector<int> types(ncomp);
+  for (int comp = 0; comp < ncomp; comp++) {
+    types[comp] = m_DiffTypeAux[scomp + comp];
+  }
+  return types;
+}
+
 Real
 PeleLM::MFSum(const Vector<const MultiFab*>& a_mf, int comp)
 {
@@ -1389,8 +1408,14 @@ PeleLM::setTypicalValues(const TimeStamp& a_time, int is_init)
       0.5 * (stateMax[RHOH] + stateMin[RHOH]) / typical_values[DENSITY];
     typical_values[TEMP] = 0.5 * (stateMax[TEMP] + stateMin[TEMP]);
     typical_values[RHORT] = m_pOld;
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
     typical_values[NE] = 0.5 * (stateMax[NE] + stateMin[NE]);
+#endif
+#if NUM_ODE > 0
+    for (int n = 0; n < NUM_ODE; n++) {
+      typical_values[FIRSTODE + n] =
+        0.5 * (stateMax[FIRSTODE + n] + stateMin[FIRSTODE + n]);
+    }
 #endif
 
     // Pass into chemsitry if requested
@@ -1411,15 +1436,23 @@ PeleLM::setTypicalValues(const TimeStamp& a_time, int is_init)
       Print() << "\tH:        " << typical_values[RHOH] << '\n';
       Vector<std::string> spec_names;
       pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(
-        spec_names);
+        spec_names, &(eos_parms.host_parm()));
       for (int n = 0; n < NUM_SPECIES; n++) {
         Print() << "\tY_" << spec_names[n]
                 << std::setw(
                      std::max(0, static_cast<int>(8 - spec_names[n].length())))
                 << std::left << ":" << typical_values[FIRSTSPEC + n] << '\n';
       }
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
       Print() << "\tnE:       " << typical_values[NE] << '\n';
+#endif
+#if NUM_ODE > 0
+      for (int n = 0; n < NUM_ODE; n++) {
+        Print() << "\t" << m_ode_names[n]
+                << std::setw(std::max(
+                     0, static_cast<int>(10 - m_ode_names[n].length())))
+                << std::left << ":" << typical_values[FIRSTODE + n] << '\n';
+      }
 #endif
     }
     Print() << PrettyLine;
@@ -1446,8 +1479,9 @@ PeleLM::updateTypicalValuesChem()
             1.E-3); // CGS -> MKS conversion
       }
       typical_values_chem[NUM_SPECIES] = typical_values[TEMP];
-#ifdef PELE_USE_EFIELD
-      auto eos = pele::physics::PhysicsType::eos();
+#ifdef PELE_USE_PLASMA
+      auto const* leosparm = &eos_parms.host_parm();
+      auto eos = pele::physics::PhysicsType::eos(leosparm);
       Real mwt[NUM_SPECIES] = {0.0};
       eos.molecular_weight(mwt);
       typical_values_chem[E_ID] =
@@ -1708,10 +1742,56 @@ PeleLM::checkMemory(const std::string& a_message) const
 void
 PeleLM::initMixtureFraction()
 {
-  // Get default fuel and oxy tank composition: pure fuel vs air
+  // set up a few variables
+  auto const* leosparm = &eos_parms.host_parm();
+  auto eos = pele::physics::PhysicsType::eos(leosparm);
   Vector<std::string> specNames;
   pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(
-    specNames);
+    specNames, leosparm);
+  ParmParse pp("peleLM");
+
+  // Do simpler things for some EOS
+  if (pele::physics::PhysicsType::eos_type::identifier() == "GammaLaw") {
+    // Do nothing - Bilger mixture fraction has no meaning here
+    // error will be raised if user tries to derive mixfrac because Zfu is
+    // negative
+    return;
+  }
+  if (pele::physics::PhysicsType::eos_type::identifier() == "Manifold") {
+    // Just take a mixture fraction if it is a manifold parameter
+    // otherwise do nothing (an error will later be raised if the user tries to
+    // derive it) also raise an error if the user requests it and it is not
+    // found
+    std::string mixfrac_name = "ZMIX";
+    bool requested_mixfrac =
+      pp.contains("mixtureFraction.manifoldParameterName");
+    pp.query("mixtureFraction.manifoldParameterName", mixfrac_name);
+    bool found = false;
+    for (int n = 0; n < NUM_SPECIES; ++n) {
+      if (specNames[n] == mixfrac_name) {
+        if (!found) {
+          found = true;
+          spec_Bilger_fact[n] = 1.0;
+        } else {
+          amrex::Abort("initMixtureFraction: requested manifold parameter "
+                       "found multiple times");
+        }
+      } else {
+        spec_Bilger_fact[n] = 0.0;
+      }
+    }
+    if (found) {
+      Zfu = 1.0;
+      Zox = 0.0;
+    } else if (requested_mixfrac) {
+      amrex::Abort(
+        "initMixtureFraction: requested manifold parameter not found");
+    }
+    return;
+  }
+
+  // Otherwise - compute Bilger weights for detailed chemistry
+
   amrex::Real YF[NUM_SPECIES], YO[NUM_SPECIES];
   for (int i = 0; i < NUM_SPECIES; ++i) {
     YF[i] = 0.0;
@@ -1727,9 +1807,7 @@ PeleLM::initMixtureFraction()
     }
   }
 
-  auto eos = pele::physics::PhysicsType::eos();
   // Overwrite with user-defined value if provided in input file
-  ParmParse pp("peleLM");
   std::string MFformat;
   int hasUserMF = static_cast<int>(pp.contains("mixtureFraction.format"));
   if (hasUserMF != 0) {
@@ -1781,7 +1859,6 @@ PeleLM::initMixtureFraction()
         for (int i = 0; i < NUM_SPECIES; ++i) {
           XF[i] = compositionIn[i];
         }
-
         eos.X2Y(XO, YO);
         eos.X2Y(XF, YF);
       } else {
@@ -1797,6 +1874,7 @@ PeleLM::initMixtureFraction()
                "peleLM.fuel_name keyword \n";
   }
 
+  // Detailed chem - compute Bilger coefficients
   // Only interested in CHON -in that order. Compute Bilger weights
   amrex::Real atwCHON[4] = {0.0};
   pele::physics::eos::atomic_weightsCHON<pele::physics::PhysicsType::eos_type>(
@@ -1837,7 +1915,7 @@ PeleLM::parseComposition(
   // Get species names
   Vector<std::string> specNames;
   pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(
-    specNames);
+    specNames, &(eos_parms.host_parm()));
 
   // For each entry in the user-provided composition, parse name and value
   std::string delimiter = ":";
@@ -1881,7 +1959,8 @@ PeleLM::parseComposition(
       massFrac[i] = compoIn[i];
     }
   } else if (compositionType == "mole") { // mole
-    auto eos = pele::physics::PhysicsType::eos();
+    auto const* leosparm = &eos_parms.host_parm();
+    auto eos = pele::physics::PhysicsType::eos(leosparm);
     eos.X2Y(compoIn, massFrac);
   } else {
     Abort("Unknown mixtureFraction.type ! Should be 'mass' or 'mole'");

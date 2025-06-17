@@ -38,6 +38,10 @@ Computational domain definition
 
 If specifying boundaries as ``Inflow``, the bcnormal function must be defined
 in the ``pelelmex_prob.H`` file for the case to define the inflow conditions.
+Note that the ``bcnormal`` function is also called for wall boundaries but should
+not modify them (except setting temperature on isothermal walls). Therefore, if
+there are a mixture of inflows with other boundary types, the bcnormal function
+should check which face is being set when applying the inflow boundary condition.
 ``Inflow`` boundaries may also be augmented with spatially and temporally
 varying turbulent fluctuations using the ``TurbInflow`` utility from
 PelePhysics. See the ``Exec/RegTests/TurbInflow`` test for an example of how
@@ -110,6 +114,7 @@ IO parameters
     #--------------------------IO CONTROL--------------------------
     amr.plot_int         = 20              # [OPT, DEF=-1] Frequency (as step #) for writing plot file
     amr.plot_overwrite   = false           # [OPT, DEF=false] Overwrite plot files with same name if present
+    amr.plot_init_state  = false           # [OPT, DEF=false] Create a plot file during initialization before the initial projections
     amr.plot_per         = 0.002           # [OPT, DEF=-1] Period (time in s) for writing plot file
     amr.plot_per_exact   = 1               # [OPT, DEF=0] Flag to enforce exactly plt_per by shortening dt
     amr.plot_file        = "plt_"          # [OPT, DEF="plt_"] Plot file prefix
@@ -120,6 +125,7 @@ IO parameters
     amr.file_stepDigits  = 6               # [OPT, DEF=5] Number of digits when adding nsteps to plt and chk names
     amr.derive_plot_vars = avg_pressure ...# [OPT, DEF=""] List of derived variable included in the plot files
     amr.plot_speciesState = 0              # [OPT, DEF=0] Force adding state rhoYs to the plot files
+    peleLM.plot_extSource = false          # [OPT, DEF=false] Force adding state external sources to the plot files
 
     amr.restart          = chk00100        # [OPT, DEF=""] Checkpoint from which to restart the simulation
     amr.initDataPlt      = plt01000        # [OPT, DEF=""] Provide a plotfile from which to extract initial data
@@ -229,8 +235,9 @@ The following list of derived variables are available in PeleLMeX:
 
 Note that `mixture_fraction` and `progress_variable` requires additional inputs from the users as described below.
 The `derUserDefined` allow the user to define its own derived variable which can comprise several components. To do
-so, the user need to copy the Source/DeriveUserDefined.cpp file into his run folder and update the file. The number of
-components is defined based on the size of the vector returned by pelelmex_setuserderives().
+so, the user need to copy the Source/DeriveUserDefined.cpp file into their run folder and update the file. The number of
+components is defined based on the size of the vector returned by `pelelmex_setuserderives()`.  Be sure to add the
+user derived variables to the input file via `amr.derive_plot_vars`.
 
 PeleLMeX algorithm
 ------------------
@@ -269,8 +276,16 @@ PeleLMeX algorithm
     peleLM.spark1.radius = 1e-3            # [OPT] Radius of the spark [m]
     peleLM.spark1.duration = 1e-3          # [OPT] Duration of the spark [s]
     peleLM.spark1.time = 1e-2              # [OPT] Time when spark starts [s]
-    
-    
+
+    peleLM.aux_vars = a b ...              # [OPT] Names of auxiliary variables
+    peleLM.a.advect = 1                    # [OPT, DEF = 1] Flag whether this variable is advected
+    peleLM.a.conservative = 1              # [OPT, DEF = 1] Flag whether this variable is conservative
+    peleLM.a.diffuse = 0                   # [OPT, DEF = 1] Flag whether this variable is diffused
+    peleLM.a.Schmidt = 0.7                 # [OPT, DEF = -1] Schmidt number for auxiliary variable. If unspecified or negative, assumed to diffuse with unity Lewis number.
+
+    peleLM.user_defined_ext_sources = 0    # [OPT, DEF=0] Enable user defined source terms. Requires local ProblemSpecificFunctions.cpp.
+
+
 Transport coefficients and LES
 ------------------------------
 
@@ -289,6 +304,13 @@ Transport coefficients and LES
     peleLM.les_cs_sigma = 1.35             # [OPT, DEF=1.35] If using Sigma LES model, provides model coefficient
     peleLM.les_v = 0                       # [OPT, DEF=0] Verbosity level for LES model
     peleLM.plot_les = 0                    # [OPT, DEF=0] If doing LES, whether to plot the turbulent viscosity
+    transport.use_soret = 0                # [OPT, DEF=0] Compute diffusion including the Soret effect (note, this option is inherited from PelePhysics)
+
+.. note::
+   When using the Soret effect, boundary condition corrections are needed at isothermal boundaries,
+   which are not fully supported. Currently a correction for all terms except the wbar term
+   is applied at isothermal domain boundaries (this is likely sufficient), while no corrections are applied
+   at isothermal embedded boundaries (so use caution for isothermal EBs with Soret diffusion active).
 
 Chemistry integrator
 --------------------
@@ -393,6 +415,12 @@ in ``Exec/RegTest/EB_BackwardStepFlame`` and ``Exec/RegTest/EB_FlowPastCylinder`
 .. note::
    Note that when using isothermal EB in combination with LES, the thermal diffusion coefficient employed to compute the EB boundary thermal flux only uses the molecular contribution.
 
+Lastly, it is possible to change the default redistribution scheme described in the :ref:`geometry with embedded boundaries section: <ssec:geoEB>`
+::
+
+    peleLM.adv_redist_type = StateRedist  # [OPT, DEF=StateRedist] Redistribution scheme for advection [StateRedist, FluxRedist, NoRedist]
+    peleLM.diff_redist_type = FluxRedist  # [OPT, DEF=FluxRedist]  Redistribution scheme for diffusion [StateRedist, FluxRedist, NoRedist]
+
 Linear solvers
 --------------
 
@@ -401,23 +429,72 @@ Linear solvers are a key component of PeleLMeX algorithm, separate controls are 
 ::
 
     #-------------------------LINEAR SOLVERS-----------------------
-    nodal_proj.verbose = 1                      # [OPT, DEF=0] Verbose of the nodal projector
-    nodal_proj.rtol = 1.0e-11                   # [OPT, DEF=1e-11] Relative tolerance of the nodal projection
-    nodal_proj.atol = 1.0e-12                   # [OPT, DEF=1e-14] Absolute tolerance of the nodal projection
-    nodal_proj.mg_max_coarsening_level = 5      # [OPT, DEF=100] Maximum number of MG levels (useful when using EB)
+    nodal_proj.verbose = 1                    # [OPT, DEF=0] Verbose of the nodal projector
+    nodal_proj.rtol = 1.0e-11                 # [OPT, DEF=1e-11] Relative tolerance of the nodal projection
+    nodal_proj.atol = 1.0e-12                 # [OPT, DEF=1e-14] Absolute tolerance of the nodal projection
+    nodal_proj.maxiter = 50                   # [OPT, DEF=] Maximum number of iterations of the nodal projection
+    nodal_proj.mg_max_coarsening_level = 5    # [OPT, DEF=100] Maximum number of MG levels (useful when using EB)
+    nodal_proj.bottom_verbose = 1             # [OPT, DEF=0] Verbose of the bottom solve for nodal projector
+    nodal_proj.bottom_rtol = 1e-3             # [OPT, DEF=1e-4] Relative tolerance of the bottom solve for nodal projection
+    nodal_proj.bottom_atol = 1e-10            # [OPT, DEF=0] Absolute tolerance of the bottom solve for nodal projection
+    nodal_proj.bottom_maxiter = 200           # [OPT, DEF=100] Maximum number of iterations of the bottom solve for nodal projection
 
-    mac_proj.verbose = 1                        # [OPT, DEF=0] Verbose of the MAC projector
-    mac_proj.rtol = 1.0e-11                     # [OPT, DEF=1e-11] Relative tolerance of the MAC projection
-    mac_proj.atol = 1.0e-12                     # [OPT, DEF=1e-14] Absolute tolerance of the MAC projection
-    mac_proj.mg_max_coarsening_level = 5        # [OPT, DEF=100] Maximum number of MG levels (useful when using EB)
+    mac_proj.verbose = 1                      # [OPT, DEF=0] Verbose of the MAC projector
+    mac_proj.rtol = 1.0e-11                   # [OPT, DEF=1e-11] Relative tolerance of the MAC projection
+    mac_proj.atol = 1.0e-12                   # [OPT, DEF=1e-14] Absolute tolerance of the MAC projection
+    mac_proj.mg_max_coarsening_level = 5      # [OPT, DEF=100] Maximum number of MG levels (useful when using EB)
+    mac_proj.bottom_verbose = 1               # [OPT, DEF=0] Verbose of the bottom solve for MAC projector
+    mac_proj.bottom_rtol = 1e-3               # [OPT, DEF=1e-4] Relative tolerance of the bottom solve for MAC projection
+    mac_proj.bottom_atol = 1e-10              # [OPT, DEF=0] Absolute tolerance of the bottom solve for MAC projection
+    mac_proj.bottom_maxiter = 200             # [OPT, DEF=100] Maximum number of iterations of the bottom solve for MAC projection
 
-    diffusion.verbose = 1                       # [OPT, DEF=0] Verbose of the scalar diffusion solve
-    diffusion.rtol = 1.0e-11                    # [OPT, DEF=1e-11] Relative tolerance of the scalar diffusion solve
-    diffusion.atol = 1.0e-12                    # [OPT, DEF=1e-14] Absolute tolerance of the scalar diffusion solve
+    diffusion.verbose = 1                     # [OPT, DEF=0] Verbose of the scalar diffusion solve
+    diffusion.rtol = 1.0e-11                  # [OPT, DEF=1e-11] Relative tolerance of the scalar diffusion solve
+    diffusion.atol = 1.0e-12                  # [OPT, DEF=1e-14] Absolute tolerance of the scalar diffusion solve
 
-    tensor_diffusion.verbose = 1                # [OPT, DEF=0] Verbose of the velocity tensor diffusion solve
-    tensor_diffusion.rtol = 1.0e-11             # [OPT, DEF=1e-11] Relative tolerance of the velocity tensor diffusion solve
-    tensor_diffusion.atol = 1.0e-12             # [OPT, DEF=1e-14] Absolute tolerance of the velocity tensor diffusion solve
+    tensor_diffusion.verbose = 1              # [OPT, DEF=0] Verbose of the velocity tensor diffusion solve
+    tensor_diffusion.rtol = 1.0e-11           # [OPT, DEF=1e-11] Relative tolerance of the velocity tensor diffusion solve
+    tensor_diffusion.atol = 1.0e-12           # [OPT, DEF=1e-14] Absolute tolerance of the velocity tensor diffusion solve
+
+Hypre support
+^^^^^^^^^^^^^
+
+Through AMReX, PeleLMeX provides interfaces to the `Hypre <https://github.com/hypre-space/hypre>`_
+preconditioners and solvers. These can be called as bottom solvers for the MLMG linear
+solvers, for both cell-centered and node-based problems.  The Hypre solvers are particularly
+useful if the geometry includes thin elements (such as tube or plate) or narrow channels,
+as coarsening of the geometry is rapidly limited by the occurrence of multi-cut cells
+(not supported by AMReX) and the linear solvers are no longer able to robustly
+tackle projections and implicit diffusion solves.
+
+To build Hypre, follow the steps outlined in the
+`AMReX documentation <https://amrex-codes.github.io/amrex/docs_html/LinearSolvers.html#external-solvers>`_.
+
+Next, in the ``GNUmakefile``, enable Hypre and define the path to the Hypre directory:
+
+::
+
+    USE_HYPRE = TRUE
+    HYPRE_HOME = /path_to_hypre_dir/hypre/src/hypre
+
+
+Select input file controls are provided below for the ``mac_proj`` bottom solver, which
+can be applied similarly for the ``nodal_proj``. Additional information on the Hypre
+solvers and parameters can be found in the `Hypre documentation <https://hypre.readthedocs.io/en/latest/>`_.
+
+::
+
+    #----------------------HYPRE LINEAR SOLVERS--------------------
+    mac_proj.bottom_solver = "hypre"
+    mac_proj.hypre_namespace = mac_proj.hypre
+    mac_proj.hypre.verbose = 1
+    mac_proj.hypre.hypre_solver = GMRES
+    mac_proj.hypre.hypre_preconditioner = BoomerAMG
+    mac_proj.hypre.bamg_verbose = 0
+    mac_proj.hypre.bamg_coarsen_type = 9
+    mac_proj.hypre.bamg_interp_type = 4
+    mac_proj.hypre.bamg_relax_type = 7
+
 
 Active control
 --------------

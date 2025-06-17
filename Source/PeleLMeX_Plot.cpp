@@ -86,7 +86,9 @@ PeleLM::WritePlotFile()
   //----------------------------------------------------------------
   // Average down the state
   averageDownState(AmrNewTime);
-
+  if (m_nAux > 0) {
+    averageDownAux(AmrNewTime);
+  }
   // Get consistent reaction data across level
   if ((m_do_react != 0) && (m_skipInstantRR == 0) && (m_plot_react != 0)) {
     averageDownReaction();
@@ -115,6 +117,8 @@ PeleLM::WritePlotFile()
       ncomp += 1;
     }
   }
+
+  ncomp += m_nAux;
 
   // Reactions
   if ((m_do_react != 0) && (m_skipInstantRR == 0) && (m_plot_react != 0)) {
@@ -155,7 +159,7 @@ PeleLM::WritePlotFile()
   }
 #endif
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
   if (m_do_extraEFdiags) {
     ncomp += NUM_IONS * AMREX_SPACEDIM;
   }
@@ -163,6 +167,11 @@ PeleLM::WritePlotFile()
 
   if (m_do_les && m_plot_les) {
     ncomp += 1;
+  }
+
+  if (m_plot_extSource) {
+    // Plot state
+    ncomp += NVAR;
   }
 
   //----------------------------------------------------------------
@@ -175,7 +184,8 @@ PeleLM::WritePlotFile()
   //----------------------------------------------------------------
   // Components names
   Vector<std::string> names;
-  pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(names);
+  pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(
+    names, &(eos_parms.host_parm()));
 
   Vector<std::string> plt_VarsName;
   AMREX_D_TERM(plt_VarsName.push_back("x_velocity");
@@ -191,7 +201,7 @@ PeleLM::WritePlotFile()
     plt_VarsName.push_back("rhoh");
     plt_VarsName.push_back("temp");
     plt_VarsName.push_back("RhoRT");
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
     plt_VarsName.push_back("nE");
     plt_VarsName.push_back("phiV");
 #endif
@@ -219,11 +229,15 @@ PeleLM::WritePlotFile()
                  , plt_VarsName.push_back("gradpz"));
   }
 
+  for (int n = 0; n < m_nAux; n++) {
+    plt_VarsName.push_back(m_aux_names[n]);
+  }
+
   if ((m_do_react != 0) && (m_skipInstantRR == 0) && (m_plot_react != 0)) {
     for (int n = 0; n < NUM_SPECIES; n++) {
       plt_VarsName.push_back("I_R(" + names[n] + ")");
     }
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
     plt_VarsName.push_back("I_R(nE)");
 #endif
     plt_VarsName.push_back("FunctCall");
@@ -265,7 +279,7 @@ PeleLM::WritePlotFile()
   }
 #endif
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
   if (m_do_extraEFdiags) {
     for (int ivar = 0; ivar < NUM_IONS; ++ivar) {
       for (int idim = 0; idim < AMREX_SPACEDIM; ++idim) {
@@ -279,6 +293,19 @@ PeleLM::WritePlotFile()
 
   if (m_do_les && m_plot_les) {
     plt_VarsName.push_back("viscturb");
+  }
+
+#if NUM_ODE > 0
+  for (int n = 0; n < NUM_ODE; n++) {
+    plt_VarsName.push_back(m_ode_names[n]);
+  }
+#endif
+
+  // External source terms
+  if (m_plot_extSource) {
+    for (int ivar = 0; ivar < NVAR; ++ivar) {
+      plt_VarsName.push_back("extsource_" + stateVariableName(ivar));
+    }
   }
 
   //----------------------------------------------------------------
@@ -304,7 +331,7 @@ PeleLM::WritePlotFile()
       }
       MultiFab::Copy(mf_plt[lev], m_leveldata_new[lev]->state, RHOH, cnt, 3, 0);
       cnt += 3;
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
       MultiFab::Copy(mf_plt[lev], m_leveldata_new[lev]->state, NE, cnt, 2, 0);
       cnt += 2;
 #endif
@@ -333,6 +360,12 @@ PeleLM::WritePlotFile()
       MultiFab::Copy(
         mf_plt[lev], m_leveldata_new[lev]->gp, 0, cnt, AMREX_SPACEDIM, 0);
       cnt += AMREX_SPACEDIM;
+    }
+
+    if (m_nAux > 0) {
+      MultiFab::Copy(
+        mf_plt[lev], m_leveldata_new[lev]->auxiliaries, 0, cnt, m_nAux, 0);
+      cnt += m_nAux;
     }
 
     if ((m_do_react != 0) && (m_skipInstantRR == 0) && (m_plot_react != 0)) {
@@ -394,7 +427,7 @@ PeleLM::WritePlotFile()
       }
     }
 #endif
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
     if (m_do_extraEFdiags) {
       MultiFab::Copy(
         mf_plt[lev], *m_ionsFluxes[lev], 0, cnt, m_ionsFluxes[lev]->nComp(), 0);
@@ -424,6 +457,17 @@ PeleLM::WritePlotFile()
               +mut_arr_z[box_no](i, j, k) + mut_arr_z[box_no](i, j, k + 1)));
         });
       Gpu::streamSynchronize();
+      cnt += 1;
+    }
+
+#if NUM_ODE > 0
+    MultiFab::Copy(
+      mf_plt[lev], m_leveldata_new[lev]->state, FIRSTODE, cnt, NUM_ODE, 0);
+    cnt += NUM_ODE;
+#endif
+
+    if (m_plot_extSource) {
+      MultiFab::Copy(mf_plt[lev], *m_extSource[lev], 0, cnt, NVAR, 0);
     }
 
 #ifdef AMREX_USE_EB
@@ -567,6 +611,13 @@ PeleLM::WriteCheckPointFile()
     VisMF::Write(
       m_leveldata_new[lev]->press,
       amrex::MultiFabFileFullPrefix(lev, checkpointname, level_prefix, "p"));
+
+    if (m_nAux > 0) {
+      VisMF::Write(
+        m_leveldata_new[lev]->auxiliaries,
+        amrex::MultiFabFileFullPrefix(
+          lev, checkpointname, level_prefix, "aux"));
+    }
 
     if (m_incompressible == 0) {
       if (m_has_divu != 0) {
@@ -726,7 +777,7 @@ PeleLM::ReadCheckPointFile()
 
   // Load the field data
   for (int lev = 0; lev <= finest_level; ++lev) {
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
     if (!m_restart_nonEF) {
       VisMF::Read(
         m_leveldata_new[lev]->state,
@@ -756,6 +807,12 @@ PeleLM::ReadCheckPointFile()
     VisMF::Read(
       m_leveldata_new[lev]->press,
       amrex::MultiFabFileFullPrefix(lev, m_restart_chkfile, level_prefix, "p"));
+    if (m_nAux > 0) {
+      VisMF::Read(
+        m_leveldata_new[lev]->auxiliaries,
+        amrex::MultiFabFileFullPrefix(
+          lev, m_restart_chkfile, level_prefix, "aux"));
+    }
 
     if (m_incompressible == 0) {
       if (m_has_divu != 0) {
@@ -765,7 +822,7 @@ PeleLM::ReadCheckPointFile()
             lev, m_restart_chkfile, level_prefix, "divU"));
       }
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
       if (!m_restart_nonEF) {
         if (m_do_react) {
           VisMF::Read(
@@ -810,7 +867,10 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
     Abort(" initializing data from a pltfile only available for low-Mach "
           "simulations");
   }
-
+  if (m_nAux > 0) {
+    Warning(" restarting from plotfile with auxiliaries not currently "
+            "implemented, and will not be captured");
+  }
   amrex::Print() << " initData on level " << a_lev << " from pltfile "
                  << a_dataPltFile << "\n";
   if (pltfileSource == "LM") {
@@ -830,9 +890,9 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
   // Find required data in pltfile
   Vector<std::string> spec_names;
   pele::physics::eos::speciesNames<pele::physics::PhysicsType::eos_type>(
-    spec_names);
+    spec_names, &(eos_parms.host_parm()));
   int idT = -1, idV = -1, idY = -1, nSpecPlt = 0;
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
   int inE = -1, iPhiV = -1;
 #endif
 #ifdef PELE_USE_SOOT
@@ -860,7 +920,7 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
     if (firstChars == "Y(") {
       nSpecPlt += 1;
     }
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
     if (plt_vars[i] == "nE")
       inE = i;
     if (plt_vars[i] == "phiV")
@@ -928,7 +988,7 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
     }
   }
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
   // nE
   pltData.fillPatchFromPlt(a_lev, geom[a_lev], inE, NE, 1, ldata_p->state);
   // phiV
@@ -975,6 +1035,7 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
   ldata_p->gp.setVal(0.0);
 
   ProbParm const* lprobparm = prob_parm_d;
+  auto const* leosparm = eos_parms.device_parm();
 
   // If m_do_patch_flow_variables is set as true, call user-defined function to
   // patch flow variables
@@ -994,38 +1055,40 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
     auto const& rhoY_arr = ldata_p->state.array(mfi, FIRSTSPEC);
     auto const& rhoH_arr = ldata_p->state.array(mfi, RHOH);
     auto const& temp_arr = ldata_p->state.array(mfi, TEMP);
-    amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-      auto eos = pele::physics::PhysicsType::eos();
-      Real massfrac[NUM_SPECIES] = {0.0};
-      Real sumYs = 0.0;
-      for (int n = 0; n < NUM_SPECIES; n++) {
-        massfrac[n] = rhoY_arr(i, j, k, n);
+    amrex::ParallelFor(
+      bx,
+      [=, eosparm = leosparm] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+        auto eos = pele::physics::PhysicsType::eos(eosparm);
+        Real massfrac[NUM_SPECIES] = {0.0};
+        Real sumYs = 0.0;
+        for (int n = 0; n < NUM_SPECIES; n++) {
+          massfrac[n] = rhoY_arr(i, j, k, n);
 #ifdef N2_ID
-        if (n != N2_ID) {
-          sumYs += massfrac[n];
+          if (n != N2_ID) {
+            sumYs += massfrac[n];
+          }
+#endif
         }
-#endif
-      }
 #ifdef N2_ID
-      massfrac[N2_ID] = 1.0 - sumYs;
+        massfrac[N2_ID] = 1.0 - sumYs;
 #endif
 
-      // Get density
-      Real P_cgs = lprobparm->P_mean * 10.0;
-      Real rho_cgs = 0.0;
-      eos.PYT2R(P_cgs, massfrac, temp_arr(i, j, k), rho_cgs);
-      rho_arr(i, j, k) = rho_cgs * 1.0e3;
+        // Get density
+        Real P_cgs = lprobparm->P_mean * 10.0;
+        Real rho_cgs = 0.0;
+        eos.PYT2R(P_cgs, massfrac, temp_arr(i, j, k), rho_cgs);
+        rho_arr(i, j, k) = rho_cgs * 1.0e3;
 
-      // Get enthalpy
-      Real h_cgs = 0.0;
-      eos.TY2H(temp_arr(i, j, k), massfrac, h_cgs);
-      rhoH_arr(i, j, k) = h_cgs * 1.0e-4 * rho_arr(i, j, k);
+        // Get enthalpy
+        Real h_cgs = 0.0;
+        eos.TY2H(temp_arr(i, j, k), massfrac, h_cgs);
+        rhoH_arr(i, j, k) = h_cgs * 1.0e-4 * rho_arr(i, j, k);
 
-      // Fill rhoYs
-      for (int n = 0; n < NUM_SPECIES; n++) {
-        rhoY_arr(i, j, k, n) = massfrac[n] * rho_arr(i, j, k);
-      }
-    });
+        // Fill rhoYs
+        for (int n = 0; n < NUM_SPECIES; n++) {
+          rhoY_arr(i, j, k, n) = massfrac[n] * rho_arr(i, j, k);
+        }
+      });
   }
 
   // Initialize thermodynamic pressure
@@ -1038,9 +1101,6 @@ PeleLM::initLevelDataFromPlt(int a_lev, const std::string& a_dataPltFile)
 void
 PeleLM::WriteJobInfo(const std::string& path) const
 {
-  std::string OtherLine = std::string(78, '-') + "\n";
-  std::string SkipSpace = std::string(8, ' ');
-
   if (ParallelDescriptor::IOProcessor()) {
     // job_info file with details about the run
     std::ofstream jobInfoFile;
