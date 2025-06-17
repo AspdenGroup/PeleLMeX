@@ -83,8 +83,9 @@ PeleLM::MakeNewLevelFromScratch(
   if (max_level > 0 && lev != max_level) {
     m_coveredMask[lev] =
       std::make_unique<iMultiFab>(grids[lev], dmap[lev], 1, 0);
-    m_resetCoveredMask = 1;
   }
+  m_resetCoveredMask = 1;
+
   if (m_do_react != 0) {
     m_leveldatareact[lev] =
       std::make_unique<LevelDataReact>(grids[lev], dmap[lev], *m_factory[lev]);
@@ -94,7 +95,7 @@ PeleLM::MakeNewLevelFromScratch(
     m_leveldatareact[lev]->I_R.setVal(0.0);
   }
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
   m_leveldatanlsolve[lev].reset(
     new LevelDataNLSolve(grids[lev], dmap[lev], *m_factory[lev], m_nGrowState));
   if (m_do_extraEFdiags) {
@@ -227,6 +228,14 @@ PeleLM::initData()
     averageDownState(AmrNewTime);
     fillPatchState(AmrNewTime);
 
+    if (m_nAux > 0) {
+      averageDownAux(AmrNewTime);
+      fillPatchAux(AmrNewTime);
+    }
+
+    if (m_plot_init_state) {
+      WritePlotFile();
+    }
     //----------------------------------------------------------------
     // If performing UnitTest, let's stop here
     if (runMode() != "normal") {
@@ -262,6 +271,9 @@ PeleLM::initData()
 
     Print() << PrettyLine;
 
+    // Diagnostics
+    doDiagnostics();
+
   } else {
     //----------------------------------------------------------------
     // Read starting configuration from chk file.
@@ -275,8 +287,8 @@ PeleLM::initData()
       RadInit();
     }
 #endif
-#ifdef PELE_USE_EFIELD
-    // If restarting from a non efield simulation
+#ifdef PELE_USE_PLASMA
+    // If restarting from a non plasma simulation
     if (m_restart_nonEF) {
       // either pass Y_ne -> nE or initialize nE for electro-neutral
       if (m_restart_electroneutral) {
@@ -352,6 +364,7 @@ PeleLM::initLevelData(int lev)
   // Prob/PMF data
   ProbParm const* lprobparm = prob_parm_d;
   auto const* lpmfdata = pmf_data.device_parm();
+  auto const local_m_incompressible = m_incompressible;
 
 #ifdef PELE_USE_VELOCITY
   //
@@ -410,23 +423,23 @@ PeleLM::initLevelData(int lev)
 #ifdef PELE_USE_VELOCITY
     auto const& tmpVel_arr = tmpVel.array(mfi);
 #endif
-
-    amrex::ParallelFor(
-      bx, [=, m_incompressible = m_incompressible] AMREX_GPU_DEVICE(
-            int i, int j, int k) noexcept {
-        pelelmex_initdata(
-          i, j, k, m_incompressible, state_arr, aux_arr, geomdata, *lprobparm,
-          lpmfdata);
-	
+  
+    amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+      ProblemSpecificFunctions::initdata(
+        i, j, k, local_m_incompressible, state_arr, aux_arr, geomdata,
+        *lprobparm, lpmfdata);
+    });
+    
 #ifdef PELE_USE_VELOCITY
 	// add the velocity loaded from plotfile
 	for (int n=0; n<AMREX_SPACEDIM; n++)
 	  state_arr(i,j,k,XVEL+n) += tmpVel_arr(i,j,k,n);
 #endif
-      });
+    
+    
   }
 
-  if (m_incompressible == 0) {
+  if (local_m_incompressible == 0) {
     // Initialize thermodynamic pressure
     setThermoPress(lev, AmrNewTime);
     if (m_has_divu != 0) {
@@ -440,7 +453,7 @@ PeleLM::projectInitSolution()
 {
   const int is_init = 1;
 
-#ifdef PELE_USE_EFIELD
+#ifdef PELE_USE_PLASMA
   poissonSolveEF(AmrNewTime);
   fillPatchPhiV(AmrNewTime);
 #endif
@@ -463,7 +476,7 @@ PeleLM::projectInitSolution()
       std::unique_ptr<AdvanceDiffData> diffData;
       diffData = std::make_unique<AdvanceDiffData>(
         finest_level, grids, dmap, m_factory, m_nGrowAdv, m_use_wbar,
-        m_use_soret, is_initialization);
+        m_use_soret, m_nAux, is_initialization);
       calcDivU(
         is_initialization, computeDiffusionTerm, do_avgDown, AmrNewTime,
         diffData);
@@ -518,7 +531,7 @@ PeleLM::projectInitSolution()
         std::unique_ptr<AdvanceDiffData> diffData;
         diffData = std::make_unique<AdvanceDiffData>(
           finest_level, grids, dmap, m_factory, m_nGrowAdv, m_use_wbar,
-          m_use_soret, is_initialization);
+          m_use_soret, m_nAux, is_initialization);
         calcDivU(
           is_initialization, computeDiffusionTerm, do_avgDown, AmrNewTime,
           diffData);
