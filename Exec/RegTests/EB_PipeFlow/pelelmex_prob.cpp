@@ -25,8 +25,3 @@ PeleLM::readProbParm() // NOLINT(readability-make-member-function-const)
   }
   */
 }
-
-void
-PeleLM::freeProbParm()
-{
-}

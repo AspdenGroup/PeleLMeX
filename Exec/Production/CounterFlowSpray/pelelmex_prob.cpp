@@ -21,8 +21,3 @@ PeleLM::readProbParm()
   pp.query("ignition_SphRad", PeleLM::prob_parm->ignitSphereRad);
   pp.query("ignition_SphT", PeleLM::prob_parm->ignitT);
 }
-
-void
-PeleLM::freeProbParm()
-{
-}

@@ -13,7 +13,7 @@ USE_HIP         = FALSE
 USE_SYCL        = FALSE
 
 # PeleLMeX
-USE_PLASMA      = FALSE
+USE_EFIELD      = FALSE
 
 # PelePhysics
 Chemistry_Model = SootReaction

@@ -26,7 +26,7 @@ FSANITIZER = FALSE
 THREAD_SANITIZER = FALSE
 
 # PeleLMeX
-USE_PLASMA = FALSE
+USE_EFIELD = FALSE
 
 # PelePhysics
 Chemistry_Model = dodecane_lu

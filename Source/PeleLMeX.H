@@ -5,13 +5,13 @@
 #include "PeleLMeX_UserKeys.H"
 #include "PeleLMeX_Index.H"
 #include "PeleLMeX_Derive.H"
-#include "pelelmex_prob.H"
+#include "pelelmex_prob_parm.H"
 #include "PeleLMeX_DiffusionOp.H"
 #include "DiagBase.H"
 #include "PeleLMeX_FlowControllerData.H"
 #include "PeleLMeX_BPatch.H"
 
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
 #include "PrecondOp.H"
 #endif
 
@@ -21,7 +21,6 @@
 #include <PMFData.H>
 #include <turbinflow.H>
 #include <ReactorBase.H>
-#include <Utilities.H>
 
 // AMReX-Hydro lib
 #include <hydro_MacProjector.H>
@@ -118,7 +117,6 @@ public:
 
   // ReadProblemParameters
   void readProbParm();
-  void freeProbParm();
 
   // ReadGridFile
   void
@@ -174,7 +172,7 @@ public:
 
     // cell-centered state multifabs
     amrex::MultiFab
-      state; // State data: velocity, density, rhoYs, rhoH, Temp, RhoRT
+      state; // Stqte data: velocity, density, rhoYs, rhoH, Temp, RhoRT
     amrex::MultiFab auxiliaries; // Auxiliary variables (passive scalars and
                                  // others) (dim:m_nAux)
     amrex::MultiFab gp;          // pressure gradient (dim:AMREX_SPACEDIM)
@@ -188,10 +186,9 @@ public:
     amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>
       visc_turb_fc; // Turbulent Viscosity (dim:)
     amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>
-      lambda_turb_fc;            // Turbulent thermal conductivity (dim:)
-    amrex::MultiFab diff_cc;     // Diffusivity (dim:NUM_SPECIES+2)
-    amrex::MultiFab diff_aux_cc; // Diffusivity of auxiliaries (dim:m_nAux)
-#ifdef PELE_USE_PLASMA
+      lambda_turb_fc;        // Turbulent thermal conductivity (dim:)
+    amrex::MultiFab diff_cc; // Diffusivity (dim:NUM_SPECIES+2)
+#ifdef PELE_USE_EFIELD
     amrex::MultiFab diffE_cc; // Electron diffusivity (dim:1)
     amrex::MultiFab mobE_cc;  // Electron mobility (dim:1)
     amrex::MultiFab mob_cc;   // Species mobility (dim:NUM_IONS)
@@ -210,7 +207,7 @@ public:
       const amrex::FabFactory<amrex::FArrayBox>& factory);
     amrex::MultiFab I_R;    // Species reaction rates
     amrex::MultiFab functC; // Implicit integrator function call count
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
     amrex::MultiFab I_RnE; // Electron number density reaction term
 #endif
   };
@@ -232,17 +229,10 @@ public:
       int a_nGrowAdv,
       int a_use_wbar,
       int a_use_soret,
-      int a_nAux,
       int is_init = 0);
     amrex::Vector<amrex::MultiFab> Dn;   // Diffusion term t^n
     amrex::Vector<amrex::MultiFab> Dnp1; // Diffusion term t^(n+1,k)
     amrex::Vector<amrex::MultiFab> Dhat; // Diffusion term t^(n+1,k+1)
-
-    amrex::Vector<amrex::MultiFab> Dn_aux; // Diffusion term t^n for auxiliaries
-    amrex::Vector<amrex::MultiFab>
-      Dnp1_aux; // Diffusion term t^(n+1,k) for auxiliaries
-    amrex::Vector<amrex::MultiFab>
-      Dhat_aux; // Diffusion term t^(n+1,k+1) for auxiliaries
 
     amrex::Vector<amrex::MultiFab> Dwbar; // Diffusion term of Wbar
     amrex::Vector<amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>>
@@ -264,22 +254,16 @@ public:
       const amrex::Vector<std::unique_ptr<amrex::FabFactory<amrex::FArrayBox>>>&
         factory,
       int a_incompressible,
-      int a_nAux,
       int a_nGrowAdv,
       int a_nGrowMAC);
     amrex::Vector<amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>>
       umac;                              // MAC face velocity
     amrex::Vector<amrex::MultiFab> AofS; // Scalar advection term at t^(n+1/2)
-    amrex::Vector<amrex::MultiFab>
-      AofS_aux; // Scalar advection term for auxiliaries at t^(n+1/2)
-    amrex::Vector<amrex::MultiFab> chi; // Thermodynamic constraint
+    amrex::Vector<amrex::MultiFab> chi;  // Thermodynamic constraint
     amrex::Vector<amrex::MultiFab>
       Forcing; // Scalar forcing for both advection and diffusion
-    amrex::Vector<amrex::MultiFab>
-      Forcing_aux; // Scalar forcing for auxiliaries for both advection and
-                   // diffusion
     amrex::Vector<amrex::MultiFab> mac_divu; // divu used in MAC projection
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
     amrex::Vector<amrex::Array<amrex::MultiFab, AMREX_SPACEDIM>>
       uDrift; // ions drift face velocity
 #endif
@@ -297,7 +281,6 @@ public:
   /**
    * \brief Fill the initial level data container
    * using the user defined init function
-   * \param lev the target level index
    */
   void initLevelData(int lev);
 
@@ -332,7 +315,6 @@ public:
    * parameters.
    */
   void checkRunParams();
-  void checkSetupParams();
 
   //-----------------------------------------------------------------------------
   // REGRID / LOAD BALANCE
@@ -568,16 +550,6 @@ public:
     const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
       a_wbarfluxes,
     const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
-      a_soretfluxes,
-    const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
-      a_auxfluxes);
-
-  void correctIsothermalBoundary(
-    const TimeStamp& a_time,
-    const amrex::Vector<amrex::MultiFab*>& a_spec_boundary,
-    const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
-      a_wbarfluxes,
-    const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
       a_soretfluxes);
 
   /**
@@ -596,12 +568,11 @@ public:
   /**
    * \brief Add the Wbar contribution to the face-centered species diffusion
    * fluxes on all levels optionally returning that contribution in a separate
-   * container
-   * \param a_fluxes diffusion fluxes to be updated
-   * \param a_wbarfluxes optional container to return the Wbar contribution
-   * \param a_spec species rhoYs state data on all levels
-   * \param a_rho density state data on all levels
-   * \param a_beta cell-centered species diffusivity on all levels
+   * container \param a_fluxes diffusion fluxes to be updated \param
+   * a_wbarfluxes optional container to return the Wbar contribution \param
+   * a_spec species rhoYs state data on all levels \param a_rho density state
+   * data on all levels \param a_beta cell-centered species diffusivity on all
+   * levels
    */
   void addWbarTerm(
     const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
@@ -610,8 +581,7 @@ public:
       a_spwbarfluxes,
     amrex::Vector<amrex::MultiFab const*> const& a_spec,
     amrex::Vector<amrex::MultiFab const*> const& a_rho,
-    amrex::Vector<amrex::MultiFab const*> const& a_beta,
-    amrex::Vector<amrex::MultiFab const*> const& a_boundary);
+    amrex::Vector<amrex::MultiFab const*> const& a_beta);
 
   /**
    * \brief Add the Soret contribution to the face-centered species diffusion
@@ -627,6 +597,7 @@ public:
       a_spfluxes,
     const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
       a_spsoretfluxes,
+    amrex::Vector<amrex::MultiFab const*> const& a_spec,
     amrex::Vector<amrex::MultiFab const*> const& a_temp,
     amrex::Vector<amrex::MultiFab const*> const& a_beta);
 
@@ -635,7 +606,6 @@ public:
    * velocity, ensuring they sum up to zero. \param a_fluxes diffusion fluxes to
    * be updated \param a_spec species rhoYs state data on all levels
    */
-  template <typename EOSType>
   void adjustSpeciesFluxes(
     const amrex::Vector<amrex::Array<amrex::MultiFab*, AMREX_SPACEDIM>>&
       a_spfluxes,
@@ -846,8 +816,6 @@ public:
 
   void addSpark(const PeleLM::TimeStamp& a_time);
 
-  void addScalarVarianceSources(const PeleLM::TimeStamp& a_time);
-
   //-----------------------------------------------------------------------------
 
 #ifdef PELE_USE_SPRAY
@@ -905,16 +873,6 @@ public:
   // Compute the radiation source term
   void computeRadSource(const PeleLM::TimeStamp& a_timestamp);
 #endif
-
-  //-----------------------------------------------------------------------------
-  // External Sources
-  bool m_user_defined_ext_sources;
-  bool m_plot_extSource;
-  bool m_ext_sources_SDC;
-  void getExternalSources(
-    int is_initIter,
-    const PeleLM::TimeStamp& a_timestamp_old,
-    const PeleLM::TimeStamp& a_timestamp_new);
 
   //-----------------------------------------------------------------------------
   // EOS
@@ -1069,9 +1027,7 @@ public:
   void fillPatchDensity(const PeleLM::TimeStamp& a_time);
   void fillPatchSpecies(const PeleLM::TimeStamp& a_time);
   void fillPatchTemp(const PeleLM::TimeStamp& a_time);
-  void fillPatchAux(const PeleLM::TimeStamp& a_time);
-
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
   void fillPatchPhiV(const PeleLM::TimeStamp& a_time);
 #endif
 
@@ -1102,8 +1058,6 @@ public:
     amrex::MultiFab& a_temp,
     int temp_comp,
     int nGhost);
-  void fillpatch_aux(
-    int lev, amrex::Real a_time, amrex::MultiFab& a_aux, int nGhost);
   void fillpatch_divu(
     int lev, amrex::Real a_time, amrex::MultiFab& a_divu, int nGhost);
   void fillpatch_gradp(
@@ -1116,7 +1070,7 @@ public:
     int nGrowForce);
   void fillpatch_chemFunctCall(
     int lev, amrex::Real a_time, amrex::MultiFab& a_fctC, int nGhost);
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
   void fillpatch_phiV(
     int lev,
     amrex::Real a_time,
@@ -1140,8 +1094,6 @@ public:
   // FillCoarsePatch state components
   void fillcoarsepatch_state(
     int lev, amrex::Real a_time, amrex::MultiFab& a_state, int nGhost);
-  void fillcoarsepatch_aux(
-    int lev, amrex::Real a_time, amrex::MultiFab& a_aux, int nGhost);
   void fillcoarsepatch_divu(
     int lev, amrex::Real a_time, amrex::MultiFab& a_divu, int nGhost);
   void fillcoarsepatch_gradp(
@@ -1162,11 +1114,10 @@ public:
   void averageDownState(const PeleLM::TimeStamp& a_time);
   void averageDownScalars(const PeleLM::TimeStamp& a_time);
   void averageDownVelocity(const PeleLM::TimeStamp& a_time);
-  void averageDownAux(const PeleLM::TimeStamp& a_time);
   void averageDown(
     const PeleLM::TimeStamp& a_time, const int state_comp, const int ncomp);
   void averageDownReaction();
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
   void averageDownnE(const PeleLM::TimeStamp& a_time);
   void averageDownPhiV(const PeleLM::TimeStamp& a_time);
 #endif
@@ -1277,25 +1228,6 @@ public:
     const amrex::Geometry& a_geom,
     amrex::Real scale,
     bool fluxes_are_area_weighted) const;
-
-#ifdef AMREX_USE_EB
-  void advFluxDivergence(
-    int a_lev,
-    amrex::MultiFab& a_divergence,
-    int div_comp,
-    amrex::MultiFab& a_divu,
-    const amrex::Array<const amrex::MultiFab*, AMREX_SPACEDIM>& a_fluxes,
-    int flux_comp,
-    const amrex::Array<const amrex::MultiFab*, AMREX_SPACEDIM>& a_faceState,
-    int face_comp,
-    const amrex::MultiFab* a_EBvelocity,
-    const amrex::MultiFab* a_EBvalue,
-    int ncomp,
-    int const* l_conserv_d,
-    const amrex::Geometry& a_geom,
-    amrex::Real scale,
-    bool fluxes_are_area_weighted) const;
-#endif
 
   void extFluxDivergenceLevel(
     int lev,
@@ -1448,23 +1380,10 @@ public:
 
   void getEBState(
     int a_lev,
-    const PeleLM::TimeStamp& a_time,
+    const amrex::Real& a_time,
     amrex::MultiFab& a_EBstate,
     int stateComp,
     int nComp);
-
-  amrex::Vector<std::unique_ptr<amrex::MultiFab>>
-  getEBState(int first_comp, int ncomp, const PeleLM::TimeStamp& a_time);
-
-  std::unique_ptr<amrex::MultiFab> getEBState(
-    int a_lev, int first_comp, int ncomp, const PeleLM::TimeStamp& a_time);
-
-  amrex::FArrayBox getEBState(
-    const amrex::MFIter& a_mfi,
-    int a_lev,
-    int first_comp,
-    int ncomp,
-    const PeleLM::TimeStamp& a_time);
 
   void getEBDiff(
     int a_lev,
@@ -1482,8 +1401,6 @@ public:
     amrex::Vector<amrex::MultiFab*> const& a_vel,
     amrex::Vector<amrex::Array<amrex::MultiFab const*, AMREX_SPACEDIM>> const&
       a_umac);
-
-  void checkEBInflowFunctions();
 #endif
 
   //-----------------------------------------------------------------------------
@@ -1522,10 +1439,10 @@ public:
   void getScalarReactForce(std::unique_ptr<AdvanceAdvData>& advData);
   //-----------------------------------------------------------------------------
 
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
 #include <PeleLMeX_EF.H>
   //-----------------------------------------------------------------------------
-  // PLASMA
+  // EFIELD
 
   void poissonSolveEF(const PeleLM::TimeStamp& a_time);
 
@@ -1641,7 +1558,7 @@ public:
 
   static int nCompIR()
   {
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
     return NUM_SPECIES + 1;
 #else
     return NUM_SPECIES;
@@ -1650,7 +1567,7 @@ public:
 
   static int nCompForcing()
   {
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
     return NUM_SPECIES + 2;
 #else
     return NUM_SPECIES + 1;
@@ -1697,12 +1614,7 @@ public:
   amrex::Vector<amrex::MultiFab*>
   getViscosityVect(const PeleLM::TimeStamp& a_time);
   amrex::Vector<amrex::MultiFab*> getIRVect();
-  amrex::Vector<std::unique_ptr<amrex::MultiFab>>
-  getAuxVect(const PeleLM::TimeStamp& a_time);
-  amrex::Vector<amrex::MultiFab*>
-  getAuxDiffusivityVect(const PeleLM::TimeStamp& a_time);
-
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
   amrex::Vector<std::unique_ptr<amrex::MultiFab>>
   getPhiVVect(const PeleLM::TimeStamp& a_time);
   amrex::Vector<std::unique_ptr<amrex::MultiFab>>
@@ -1712,11 +1624,8 @@ public:
 #endif
 
   amrex::Vector<amrex::BCRec> fetchBCRecArray(int scomp, int ncomp);
-  amrex::Vector<amrex::BCRec> fetchBCRecAuxArray(int scomp, int ncomp);
   amrex::Vector<int> fetchAdvTypeArray(int scomp, int ncomp);
   amrex::Vector<int> fetchDiffTypeArray(int scomp, int ncomp);
-  amrex::Vector<int> fetchAdvTypeAuxArray(int scomp, int ncomp);
-  amrex::Vector<int> fetchDiffTypeAuxArray(int scomp, int ncomp);
   DiffusionOp* getDiffusionOp();
   DiffusionOp* getMCDiffusionOp(int ncomp = 1);
   DiffusionTensorOp* getDiffusionTensorOp();
@@ -1744,7 +1653,7 @@ public:
 
   // Fine-covered cells mask
   amrex::Vector<std::unique_ptr<amrex::iMultiFab>> m_coveredMask;
-  int m_resetCoveredMask{0};
+  int m_resetCoveredMask;
 
   // Chemistry BA & DM
   amrex::Vector<std::unique_ptr<amrex::BoxArray>> m_baChem;
@@ -1758,14 +1667,13 @@ public:
 
   // Boundary Conditions
   amrex::BCRec m_phys_bc; // Store physical BC from input
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
   amrex::BCRec m_phiV_bc;    // Store separate phiV BC from input
   amrex::BCRec m_phiV_bcpol; // Store separate phiV BC polarity from input
 #endif
   amrex::Vector<amrex::BCRec> m_bcrec_state;
   amrex::BCRec m_bcrec_divu;
   amrex::Vector<amrex::BCRec> m_bcrec_force;
-  amrex::Vector<amrex::BCRec> m_bcrec_aux;
 
   // Advection/Diffusion types
   amrex::Vector<int>
@@ -1845,11 +1753,6 @@ public:
     pele::physics::PhysicsType::transport_type>>
     trans_parms;
 
-  // EOS pointer
-  static pele::physics::PeleParams<
-    pele::physics::eos::EosParm<pele::physics::PhysicsType::eos_type>>
-    eos_parms;
-
   // Reactor pointer
   std::string m_chem_integrator;
   std::unique_ptr<pele::physics::reactions::ReactorBase> m_reactor;
@@ -1876,7 +1779,6 @@ public:
   int m_plotStateSpec = 0;
   int m_plot_int = 0;
   bool m_plot_overwrite = false;
-  bool m_plot_init_state = false;
   int m_plot_zeroEBcovered = 1;
   amrex::Real m_plot_per_approx = -1.;
   amrex::Real m_plot_per_exact = -1.;
@@ -1949,19 +1851,9 @@ public:
   amrex::Real m_divu_dtFactor = 0.5;
   amrex::Real m_divu_rhoMin = 0.1;
 
-// ODE variable names
-#if NUM_ODE > 0
-  amrex::Vector<std::string> m_ode_names;
-  void predictODEQty();
-#endif
-
   // Aux data size
   int m_nAux = 0;
-  amrex::Vector<std::string> m_aux_names;
-  amrex::Vector<int> m_AdvTypeAux;
-  amrex::Vector<int> m_DiffTypeAux;
-  amrex::Vector<amrex::Real> m_aux_Schmidt;
-  amrex::Vector<int> m_aux_advect;
+
   // R-z
   int m_rz_correction = 0;
 
@@ -1979,7 +1871,7 @@ public:
 
   int m_use_wbar = 1;
   int m_use_soret = 0;
-  int m_soret_boundary_override = 0;
+
   // LES Model
   bool m_do_les = false;
   bool m_plot_les = false;
@@ -1988,7 +1880,7 @@ public:
   amrex::Real m_les_cs_smag = 0.18;
   amrex::Real m_les_cm_wale = 0.60;
   amrex::Real m_les_cs_sigma = 1.35;
-  amrex::Real m_les_c_chi = 20.0;
+  amrex::Vector<amrex::Real> m_turb_visc_time;
 
   // switch on/off different processes
   // TODO: actually implement that
@@ -2106,7 +1998,6 @@ public:
   amrex::Vector<amrex::Real> coveredState_h;
   amrex::Gpu::DeviceVector<amrex::Real> coveredState_d;
   int m_isothermalEB = 0;
-  int m_useEBinflow = 0;
 
   // EB redistribution
   std::string m_adv_redist_type = "StateRedist";

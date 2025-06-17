@@ -56,8 +56,3 @@ PeleLM::readProbParm() // NOLINT(readability-make-member-function-const)
   amrex::Print() << " mu [CGS] : " << trans_parm.const_viscosity << "\n";
   amrex::Print() << " #################################### \n";
 }
-
-void
-PeleLM::freeProbParm()
-{
-}

@@ -13,20 +13,20 @@ concurrency:
 
 jobs:
   Formatting:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
     - name: Clone
       uses: actions/checkout@v4
     - name: Check formatting
-      uses: DoozyX/clang-format-lint-action@v0.20
+      uses: DoozyX/clang-format-lint-action@v0.18.2
       with:
         source: './Source ./Exec'
         exclude: '.'
         extensions: 'H,h,cpp'
-        clangFormatVersion: 20
+        clangFormatVersion: 18
   CPU-GNUmake:
     needs: Formatting
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -37,9 +37,9 @@ jobs:
         run: |
           echo "NPROCS=$(nproc)" >> $GITHUB_ENV
           echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESSLEVEL=10" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=1" >> $GITHUB_ENV
           echo "CCACHE_LOGFILE=${{github.workspace}}/ccache.log.txt" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=100M" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=200M" >> $GITHUB_ENV
           make COMP=gnu USE_MPI=FALSE DEBUG=TRUE TPL
           make COMP=llvm USE_MPI=FALSE DEBUG=TRUE PRECISION=FLOAT TPL
       - name: Install Ccache
@@ -72,7 +72,7 @@ jobs:
       - name: FlameSheet debug report
         working-directory: ./Exec/RegTests/FlameSheet
         run: |
-          egrep "Warning:|Error:|warning:|error:" build-output.txt \
+          egrep "warning:|error:" build-output.txt \
             | egrep -v "Submodules/amrex|Submodules/sundials|Submodules/AMReX-Hydro|GNUmakefile|ThirdParty" \
             | egrep -v "ld: warning:" | sort | uniq \
             | awk 'BEGIN{i=0}{print $0}{i++}END{print "Warnings: "i}' > warnings.txt
@@ -84,26 +84,25 @@ jobs:
     runs-on: ${{matrix.os}}
     strategy:
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-latest, macos-latest]
         build_type: [Release, Debug]
         enable_eb: [EB-OFF, EB-ON]
         include:
           - os: macos-latest
-            install_deps: brew install open-mpi automake ccache
+            install_deps: brew install mpich automake ccache
             comp: llvm
             procs: $(sysctl -n hw.ncpu)
             ccache_cache: /Users/runner/Library/Caches/ccache
-          - os: ubuntu-24.04
-            #Note mpich on ubuntu-24.04 does not run mpiexec correctly so we are using openmpi
-            install_deps: sudo apt-get install -y libopenmpi-dev openmpi-bin
+          - os: ubuntu-latest
+            install_deps: sudo apt-get update && sudo apt-get install mpich libmpich-dev
             comp: gnu
             procs: $(nproc)
             ccache_cache: ~/.cache/ccache
           - build_type: Release
             ctest_args: -LE no-ci
-            ccache_size: 250M
+            ccache_size: 100M
           - build_type: Debug
-            ctest_args: -R covo
+            ctest_args: -LE no-ci
             ccache_size: 500M
           - enable_eb: EB-OFF
             use_eb: "OFF"
@@ -125,7 +124,7 @@ jobs:
         run: |
           echo "NPROCS=${{matrix.procs}}" >> $GITHUB_ENV
           echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESSLEVEL=10" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=1" >> $GITHUB_ENV
           echo "CCACHE_LOGFILE=${{github.workspace}}/ccache.log.txt" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=${{matrix.ccache_size}}" >> $GITHUB_ENV
           cmake -E make_directory ${{runner.workspace}}/deps
@@ -163,7 +162,6 @@ jobs:
             -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
             -DPELE_DIM:STRING=${DIM} \
             -DPELE_ENABLE_MPI:BOOL=ON \
-            -DMPIEXEC_PREFLAGS:STRING=--oversubscribe \
             -DPELE_ENABLE_EB:BOOL=${{matrix.use_eb}} \
             -DPELE_ENABLE_FCOMPARE_FOR_TESTS:BOOL=OFF \
             -DCMAKE_CXX_COMPILER_LAUNCHER:STRING=ccache \
@@ -186,7 +184,7 @@ jobs:
       - name: Report
         run: |
           echo "::add-matcher::.github/problem-matchers/gcc.json"
-          egrep "Warning:|Error:|warning:|error:" ${{runner.workspace}}/build-output.txt \
+          egrep "warning:|error:" ${{runner.workspace}}/build-output.txt \
             | egrep -v "Submodules/amrex|Submodules/sundials|Submodules/AMReX-Hydro" \
             | egrep -v "ld: warning:" | egrep -v "lto-wrapper: warning:" | sort | uniq \
             | awk 'BEGIN{i=0}{print $0}{i++}END{print "Warnings: "i}' > ${{runner.workspace}}/build-output-warnings.txt
@@ -198,22 +196,19 @@ jobs:
           (for DIM in 2 3; do \
             printf "\n-------- Testing ${DIM}D --------\n"; \
             cd ${{runner.workspace}}/build-${DIM}d-${{matrix.os}}-${{matrix.build_type}}-${{matrix.enable_eb}}; \
-            ctest ${{matrix.ctest_args}} -VV --output-on-failure; \
+            ctest -j ${{env.NPROCS}} ${{matrix.ctest_args}} --output-on-failure; \
             if [ $? -ne 0 ]; then exit 1; fi \
           done)
   GPU-Nvidia:
     name: GPU-CUDA
     needs: [Formatting, CPU-GNUmake]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
-        enable_eb: [EB-OFF, EB-ON]
+        cuda_ver: [11.4]
         include:
-          - enable_eb: EB-OFF
-            use_eb: "OFF"
-          - enable_eb: EB-ON
-            use_eb: "ON"
-      fail-fast: false
+          - cuda_ver: "11.4"
+            cuda_pkg: 11-4
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -223,21 +218,22 @@ jobs:
         run: |
           echo "NPROCS=$(nproc)" >> $GITHUB_ENV
           echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESSLEVEL=10" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=1" >> $GITHUB_ENV
           echo "CCACHE_LOGFILE=${{github.workspace}}/ccache.log.txt" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=300M" >> $GITHUB_ENV
       - name: Dependencies
         run: |
           ${{github.workspace}}/Submodules/PelePhysics/Submodules/amrex/.github/workflows/dependencies/ubuntu_free_disk_space.sh
-          wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
+          curl -O https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
+          sudo dpkg -i cuda-keyring_1.0-1_all.deb
           sudo apt-get update
-          sudo apt-get install -y cuda-command-line-tools-12-6 \
-              cuda-compiler-12-6 cuda-minimal-build-12-6 \
-              cuda-nvml-dev-12-6 cuda-nvtx-12-6 \
-              libcurand-dev-12-6 cuda-cupti-dev-12-6 \
-              libcusolver-dev-12-6 libcusparse-dev-12-6 \
-              libcublas-dev-12-6 libcurand-dev-12-6 libnvjitlink-12-6
+          sudo apt-get install -y \
+              cuda-command-line-tools-${{matrix.cuda_pkg}} \
+              cuda-compiler-${{matrix.cuda_pkg}} cuda-minimal-build-${{matrix.cuda_pkg}} \
+              cuda-nvml-dev-${{matrix.cuda_pkg}} cuda-nvtx-${{matrix.cuda_pkg}} \
+              libcurand-dev-${{matrix.cuda_pkg}} cuda-cupti-dev-${{matrix.cuda_pkg}} \
+              libcusolver-dev-${{matrix.cuda_pkg}} libcusparse-dev-${{matrix.cuda_pkg}} \
+              libcublas-dev-${{matrix.cuda_pkg}}
       - name: Install Ccache
         run: |
           wget https://github.com/ccache/ccache/releases/download/v4.8/ccache-4.8-linux-x86_64.tar.xz
@@ -252,23 +248,22 @@ jobs:
                ccache-${{github.workflow}}-${{github.job}}-git-
       - name: Configure
         run: |
-          export PATH=/usr/local/nvidia/bin:/usr/local/cuda-12.6/bin:${PATH}
-          export LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda-12.6/lib:${LD_LIBRARY_PATH}
-          cmake -Bbuild-cuda \
+          export PATH=/usr/local/nvidia/bin:/usr/local/cuda-${{matrix.cuda_ver}}/bin:${PATH}
+          export LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda-${{matrix.cuda_ver}}/lib:${LD_LIBRARY_PATH}
+          cmake -Bbuild-${{matrix.cuda_pkg}} \
             -DCMAKE_BUILD_TYPE:STRING=Release \
             -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
             -DPELE_ENABLE_MPI:BOOL=OFF \
             -DPELE_ENABLE_CUDA:BOOL=ON \
-            -DPELE_ENABLE_EB:BOOL=${{matrix.use_eb}} \
             -DAMReX_CUDA_ERROR_CAPTURE_THIS:BOOL=ON \
-            -DCMAKE_CUDA_ARCHITECTURES:STRING=80 \
+            -DCMAKE_CUDA_ARCHITECTURES:STRING=70 \
             -DCMAKE_CUDA_COMPILER_LAUNCHER:STRING=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER:STRING=ccache \
             ${{github.workspace}}
       - name: Build
         run: |
           ccache -z
-          cmake --build build-cuda --parallel ${{env.NPROCS}}
+          cmake --build build-${{matrix.cuda_pkg}} --parallel ${{env.NPROCS}}
       - name: Ccache Report
         run: |
           ccache -s
@@ -276,7 +271,7 @@ jobs:
   GPU-AMD:
     name: GPU-HIP
     needs: [Formatting, CPU-GNUmake]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -286,19 +281,20 @@ jobs:
         run: |
           echo "NPROCS=$(nproc)" >> $GITHUB_ENV
           echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESSLEVEL=10" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=1" >> $GITHUB_ENV
           echo "CCACHE_LOGFILE=${{github.workspace}}/ccache.log.txt" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=200M" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=80M" >> $GITHUB_ENV
       - name: Dependencies
         run: |
           ${{github.workspace}}/Submodules/PelePhysics/Submodules/amrex/.github/workflows/dependencies/ubuntu_free_disk_space.sh
-          sudo mkdir --parents --mode=0755 /etc/apt/keyrings
-          wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
-          echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.3.3 noble main" | sudo tee --append /etc/apt/sources.list.d/rocm.list
-          echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | sudo tee /etc/apt/preferences.d/rocm-pin-600
-          echo 'export PATH=/opt/rocm/llvm/bin:/opt/rocm/bin:/opt/rocm/profiler/bin:/opt/rocm/opencl/bin:$PATH' | sudo tee -a /etc/profile.d/rocm.sh
+          curl -O https://repo.radeon.com/rocm/rocm.gpg.key
+          sudo apt-key add rocm.gpg.key
+          echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/5.6.1 ubuntu main' \
+              | sudo tee /etc/apt/sources.list.d/rocm.list
+          echo 'export PATH=/opt/rocm/llvm/bin:/opt/rocm/bin:/opt/rocm/profiler/bin:/opt/rocm/opencl/bin:$PATH' \
+              | sudo tee -a /etc/profile.d/rocm.sh
           sudo apt-get update
-          sudo apt-get install -y rocm-dev rocrand-dev rocprim-dev hiprand-dev rocsparse-dev
+          sudo apt-get install -y rocm-dev rocrand-dev rocprim-dev
       - name: Install Ccache
         run: |
           wget https://github.com/ccache/ccache/releases/download/v4.8/ccache-4.8-linux-x86_64.tar.xz
@@ -317,8 +313,6 @@ jobs:
           which clang
           which clang++
           which hipcc
-          hipcc --version
-          hipconfig --full
           cmake -B${{runner.workspace}}/build-hip \
           -DCMAKE_BUILD_TYPE:STRING=Release \
           -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
@@ -347,7 +341,7 @@ jobs:
   GPU-Intel:
     name: GPU-SYCL
     needs: [Formatting, CPU-GNUmake]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -357,18 +351,19 @@ jobs:
         run: |
           echo "NPROCS=$(nproc)" >> $GITHUB_ENV
           echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESSLEVEL=10" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=1" >> $GITHUB_ENV
           echo "CCACHE_LOGFILE=${{github.workspace}}/ccache.log.txt" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=200M" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=80M" >> $GITHUB_ENV
           echo "CCACHE_DEPEND=1" >> $GITHUB_ENV
       - name: Dependencies
         run: |
           ${{github.workspace}}/Submodules/PelePhysics/Submodules/amrex/.github/workflows/dependencies/ubuntu_free_disk_space.sh
           sudo wget https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
           sudo apt-key add GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB
-          echo "deb https://apt.repos.intel.com/oneapi all main" | sudo tee /etc/apt/sources.list.d/oneAPI.list
+          echo "deb https://apt.repos.intel.com/oneapi all main" \
+              | sudo tee /etc/apt/sources.list.d/oneAPI.list
           sudo apt-get update
-          sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp=2024.2.1-1079 intel-oneapi-mkl-devel=2024.2.2-15
+          sudo apt-get install -y intel-oneapi-compiler-dpcpp-cpp intel-oneapi-mkl-devel
       - name: Install Ccache
         run: |
           wget https://github.com/ccache/ccache/releases/download/v4.8/ccache-4.8-linux-x86_64.tar.xz
@@ -410,7 +405,7 @@ jobs:
           du -hs ~/.cache/ccache
   Lint-clang-tidy:
     needs: Formatting
-    runs-on: ubuntu-24.04
+    runs-on: macos-13
     strategy:
       matrix:
         enable_eb: [EB-OFF, EB-ON]
@@ -423,34 +418,28 @@ jobs:
     steps:
       - name: Setup
         run: |
-          echo "NPROCS=$(nproc)" >> $GITHUB_ENV
+          echo "NPROCS=$(sysctl -n hw.ncpu)" >> $GITHUB_ENV
           echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "CCACHE_COMPRESSLEVEL=10" >> $GITHUB_ENV
+          echo "CCACHE_COMPRESSLEVEL=1" >> $GITHUB_ENV
           echo "CCACHE_LOGFILE=${{github.workspace}}/ccache.log.txt" >> $GITHUB_ENV
-          echo "CCACHE_EXTRAFILES=${{github.workspace}}/.clang-tidy" >> $GITHUB_ENV
-          echo "CCACHE_MAXSIZE=100M" >> $GITHUB_ENV
-          echo "CTCACHE_DIR=~/.cache/ctcache" >> $GITHUB_ENV
+          echo "CCACHE_MAXSIZE=80M" >> $GITHUB_ENV
       - name: Clone
         uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Install Ccache
         run: |
-          wget https://github.com/ccache/ccache/releases/download/v4.8/ccache-4.8-linux-x86_64.tar.xz
-          sudo curl https://raw.githubusercontent.com/matus-chochlik/ctcache/7fd516e91c17779cbc6fc18bd119313d9532dd90/clang-tidy-cache -Lo /usr/bin/clang-tidy-cache
-          tar xvf ccache-4.8-linux-x86_64.tar.xz
-          sudo cp -f ccache-4.8-linux-x86_64/ccache /usr/local/bin/
-          sudo chmod +x /usr/bin/clang-tidy-cache
-          mkdir -p ~/.cache/ctcache
+          brew install ccache
       - name: Set Up Ccache
         uses: actions/cache@v4
         with:
-          path: ~/.cache
+          path: /Users/runner/Library/Caches/ccache
           key: ccache-${{github.workflow}}-${{github.job}}-${{matrix.enable_eb}}-git-${{github.sha}}
           restore-keys: |
                ccache-${{github.workflow}}-${{github.job}}-${{matrix.enable_eb}}-git-
       - name: Configure
         run: |
+          export PATH=$(brew --prefix llvm@15)/bin:${PATH}
           cmake -B${{runner.workspace}}/build-clang-tidy \
           -DCMAKE_BUILD_TYPE:STRING=Release \
           -DCMAKE_VERBOSE_MAKEFILE:BOOL=ON \
@@ -466,19 +455,16 @@ jobs:
         working-directory: ${{runner.workspace}}/build-clang-tidy
         run: |
           #set -eu -o pipefail
+          export PATH=$(brew --prefix llvm@15)/bin:${PATH}
           cmake --build . --parallel ${{env.NPROCS}} 2>&1 | tee -a clang-tidy-full-report.txt
-          egrep "Warning:|Error:|warning:|error:" clang-tidy-full-report.txt \
+          egrep "warning:|error:" clang-tidy-full-report.txt \
             | egrep -v "Submodules/amrex|Submodules/sundials|Submodules/AMReX-Hydro" \
             | egrep -v "ld: warning:" | sort | uniq \
             | awk 'BEGIN{i=0}{print $0}{i++}END{print "Warnings: "i}' > clang-tidy-warnings.txt
       - name: Ccache Report
         run: |
-          ls ~/.cache
-          ls ~/.cache/ccache
-          du -hs ~/.cache/ccache
-          ls ~/.cache/ctcache
-          du -hs ~/.cache/ctcache
           ccache -s
+          du -hs /Users/runner/Library/Caches/ccache
       - name: Full report
         working-directory: ${{runner.workspace}}/build-clang-tidy
         run: cat clang-tidy-full-report.txt
@@ -491,7 +477,7 @@ jobs:
           exit ${return}
   Lint-codeql:
     needs: Formatting
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -538,7 +524,7 @@ jobs:
           sarif_file: sarif-results/cpp.sarif
   Lint-codespell:
     needs: Formatting
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Clone
         uses: actions/checkout@v4
@@ -555,3 +541,17 @@ jobs:
           pip install codespell
       - name: Run codespell
         run: codespell
+  Save-PR-Number:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save PR number
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+        run: |
+          echo $PR_NUMBER > pr_number.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr_number
+          path: pr_number.txt
+          retention-days: 1

@@ -18,9 +18,3 @@ PeleLM::readProbParm()
     PeleLM::prob_parm->soot_vals[n] = moments[n];
   }
 }
-
-void
-PeleLM::freeProbParm()
-{
-  PeleLM::pmf_data.deallocate();
-}

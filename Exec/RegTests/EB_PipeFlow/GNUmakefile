@@ -25,6 +25,9 @@ DEBUG = FALSE
 FSANITIZER = FALSE
 THREAD_SANITIZER = FALSE
 
+# PeleLMeX
+CEXE_headers += EBUserDefined.H
+
 # PelePhysics
 Chemistry_Model = air
 Eos_Model = Fuego

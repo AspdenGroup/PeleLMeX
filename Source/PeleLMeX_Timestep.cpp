@@ -29,7 +29,7 @@ PeleLM::computeDt(int is_init, const TimeStamp& a_time)
         dtdivU = estDivUDt(a_time);
         estdt = std::min(estdt, dtdivU);
       }
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
       Real dtions = estEFIonsDt(a_time);
       estdt = std::min(estdt, dtions);
 #endif
@@ -39,7 +39,7 @@ PeleLM::computeDt(int is_init, const TimeStamp& a_time)
 #endif
       if (m_verbose != 0) {
         Print() << " Est. time step - Conv: " << dtconv << ", divu: " << dtdivU
-#ifdef PELE_USE_PLASMA
+#ifdef PELE_USE_EFIELD
                 << ", ions: " << dtions
 #endif
 #ifdef PELE_USE_SPRAY

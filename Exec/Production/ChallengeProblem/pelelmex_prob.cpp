@@ -232,13 +232,3 @@ PeleLM::readProbParm()
       PeleLM::prob_parm->d_winput);
   }
 }
-
-void
-PeleLM::freeProbParm()
-{
-  amrex::The_Arena()->free(PeleLM::prob_parm->d_xarray);
-  amrex::The_Arena()->free(PeleLM::prob_parm->d_xdiff);
-  amrex::The_Arena()->free(PeleLM::prob_parm->d_uinput);
-  amrex::The_Arena()->free(PeleLM::prob_parm->d_vinput);
-  amrex::The_Arena()->free(PeleLM::prob_parm->d_winput);
-}

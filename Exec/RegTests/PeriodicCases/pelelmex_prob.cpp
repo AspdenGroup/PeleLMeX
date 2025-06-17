@@ -90,8 +90,3 @@ PeleLM::readProbParm() // NOLINT(readability-make-member-function-const)
     PeleLM::trans_parms.sync_to_device();
   }
 }
-
-void
-PeleLM::freeProbParm()
-{
-}

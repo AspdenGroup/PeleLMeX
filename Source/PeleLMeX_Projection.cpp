@@ -52,9 +52,8 @@ PeleLM::initialProjection()
   // Get velocity
   Vector<std::unique_ptr<MultiFab>> vel;
   for (int lev = 0; lev <= finest_level; ++lev) {
-    vel.push_back(
-      std::make_unique<MultiFab>(
-        m_leveldata_new[lev]->state, amrex::make_alias, VELX, AMREX_SPACEDIM));
+    vel.push_back(std::make_unique<MultiFab>(
+      m_leveldata_new[lev]->state, amrex::make_alias, VELX, AMREX_SPACEDIM));
     vel[lev]->setBndry(0.0);
     setInflowBoundaryVel(*vel[lev], lev, AmrNewTime);
     scaleProj_RZ(lev, *vel[lev]);
@@ -268,9 +267,8 @@ PeleLM::velocityProjection(
   // Get velocity
   Vector<std::unique_ptr<MultiFab>> vel;
   for (int lev = 0; lev <= finest_level; ++lev) {
-    vel.push_back(
-      std::make_unique<MultiFab>(
-        m_leveldata_new[lev]->state, amrex::make_alias, VELX, AMREX_SPACEDIM));
+    vel.push_back(std::make_unique<MultiFab>(
+      m_leveldata_new[lev]->state, amrex::make_alias, VELX, AMREX_SPACEDIM));
 #ifdef AMREX_USE_EB
     EB_set_covered(*vel[lev], 0.0);
 #endif
@@ -434,15 +432,6 @@ PeleLM::doNodalProject(
   }
 
   nodal_projector->setDomainBC(lobc, hibc);
-
-#ifdef AMREX_USE_EB
-  if (m_useEBinflow != 0) {
-    for (int lev = 0; lev <= finest_level; ++lev) {
-      nodal_projector->getLinOp().setEBInflowVelocity(
-        lev, *getEBState(lev, VELX, AMREX_SPACEDIM, AmrNewTime));
-    }
-  }
-#endif
 
 #ifdef AMREX_USE_HYPRE
   nodal_projector->getMLMG().setHypreOptionsNamespace(m_hypre_namespace_nodal);

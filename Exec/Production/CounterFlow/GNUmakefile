@@ -26,10 +26,10 @@ FSANITIZER = FALSE
 THREAD_SANITIZER = FALSE
 
 # PeleLMeX
-USE_PLASMA = FALSE
+USE_EFIELD = FALSE
 
 # PelePhysics
-Chemistry_Model = dodecane_lu
+Chemistry_Model = drm19
 Eos_Model = Fuego
 Transport_Model = Simple
 

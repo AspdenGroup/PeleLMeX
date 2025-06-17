@@ -22,8 +22,3 @@ PeleLM::readProbParm() // NOLINT(readability-make-member-function-const)
   pp.query("const_diffusivity", trans_parm.const_diffusivity);
   PeleLM::trans_parms.sync_to_device();
 }
-
-void
-PeleLM::freeProbParm()
-{
-}
