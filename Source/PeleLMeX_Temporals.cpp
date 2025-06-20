@@ -319,7 +319,7 @@ PeleLM::rhoHBalance()
                        << m_domainRhoHFlux[1],
                        << "," << m_domainRhoHFlux[2] << ","
                        << m_domainRhoHFlux[3],
-                       << "," << m_domainRhoHFlux[4] << "," m_domainRhoHFlux[5])
+                       << "," << m_domainRhoHFlux[4] << "," << m_domainRhoHFlux[5])
                 << "," << rhoHFluxBalance // domain boundaries RhoH fluxes
                 << "," << std::abs(dRhoHdt - rhoHFluxBalance)
                 << "\n"; // balance

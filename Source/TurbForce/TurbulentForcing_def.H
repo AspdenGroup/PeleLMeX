@@ -715,18 +715,23 @@ TurbulentForcing::deriveForcing(
      // Need geom for forcing
      GeometryData const& geomdata = geom.data();
 
-     // addTurbVelForces "adds", so need to zero this to start
-     Array4<Real> const& der = derfab.array(dcomp);
-     derfab.setVal<RunOn::Device>(0., bx, dcomp, ncomp);
-
-     // if using turbforce and is incompressible
-     // then make a fab with constant density m_rho
-     FArrayBox DensityFab(bx);
-     DensityFab.setVal(a_pelelm->m_rho);
-     Array4<const Real> const& rho = (a_pelelm->m_incompressible) != 0
-       ? DensityFab.array()
-       : statefab.array(DENSITY);
-
+     Array4<Real> const& der = derfab.array(dcomp);     
+     // Set derfab to zero first
+     derfab.setVal<amrex::RunOn::Device>(0.0, bx, dcomp, ncomp);
+     
+     // Declare a pointer for the density array view
+     Array4<const Real> rho;
+     
+     // If incompressible, create a small temporary density array filled with m_rho
+     if (a_pelelm->m_incompressible != 0) {
+       static FArrayBox DensityFab;  // reuse across calls if this is in a looped context (optional)
+       DensityFab.resize(bx, 1);
+       DensityFab.setVal<amrex::RunOn::Device>(a_pelelm->m_rho, bx, 0, 1);
+       rho = DensityFab.const_array();
+     } else {
+       rho = statefab.const_array(DENSITY);
+     }
+     
      // call the function above to construct the forcing
      addTurbVelForces(geomdata,bx,time,der,rho);
 }

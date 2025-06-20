@@ -65,18 +65,18 @@ PeleLM::getVelForces(
     FArrayBox DummyFab(bx, 1);
     const auto& vel_arr = ldata_p->state.const_array(mfi, VELX);
 #if PELE_USE_TURBFORCE
-    // if using turbforce and is incompressible
-    // a DummyFab cannot be used
-    FArrayBox DensityFab(bx,1);
-    DensityFab.setVal(m_rho);
-    const auto& rho_arr = (m_incompressible) != 0
-                            ? DensityFab.array()
-                            : ldata_p->state.const_array(mfi, DENSITY);
-#else
-    const auto& rho_arr = (m_incompressible) != 0
-	                    ? DummyFab.array()
-                            : ldata_p->state.const_array(mfi, DENSITY);
+    FArrayBox DensityFab(bx,1);    
+    if (m_incompressible != 0) {
+      DensityFab.setVal<RunOn::Device>(m_rho,bx,0,1);
+    }
 #endif
+    const auto& rho_arr = (m_incompressible) != 0
+#if PELE_USE_TURBFORCE
+                            ? DensityFab.array()
+#else
+	                    ? DummyFab.array()
+#endif
+                            : ldata_p->state.const_array(mfi, DENSITY);
     const auto& rhoY_arr = (m_incompressible) != 0
                              ? DummyFab.array()
                              : ldata_p->state.const_array(mfi, FIRSTSPEC);
